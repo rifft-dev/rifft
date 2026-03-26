@@ -1,4 +1,9 @@
-import { getCurrentAgentId, getCurrentTraceContext, withSpan } from "rifft";
+import {
+  getCurrentAgentId,
+  getCurrentTraceContext,
+  withSpan,
+  type RifftSpan,
+} from "@rifft-dev/rifft";
 
 export type McpToolSpan = {
   "mcp.tool_name": string;
@@ -128,7 +133,7 @@ const patchMethod = (
       nextArgs[1] = injectTraceHeaders(nextArgs[1]);
     }
 
-    return withSpan("tool.call", { agent_id: agentId, framework }, async (toolSpan) => {
+    return withSpan("tool.call", { agent_id: agentId, framework }, async (toolSpan: RifftSpan) => {
       toolSpan.setAttribute("tool.name", toolName);
       toolSpan.setAttribute("tool.input", input);
       toolSpan.setAttribute("mcp.tool_name", toolName);
