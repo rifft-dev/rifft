@@ -1,5 +1,5 @@
 {
-  "name": "@rifft/mcp",
+  "name": "@rifft-dev/mcp",
   "version": "0.1.0",
   "description": "MCP adapter for Rifft",
   "license": "MIT",
@@ -41,7 +41,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "rifft": "^0.1.0"
+    "@rifft-dev/rifft": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
