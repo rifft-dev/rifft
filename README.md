@@ -3,8 +3,8 @@
 Rifft — cross-framework debugger for multi-agent AI systems.
 
 [![npm version](https://img.shields.io/npm/v/%40rifft-dev%2Frifft)](https://www.npmjs.com/package/@rifft-dev/rifft)
-[![PyPI version](https://img.shields.io/badge/PyPI-0.1.0-blue)](https://pypi.org/project/rifft/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](/Users/ned/Documents/GitHub/Rifft/LICENSE)
+[![PyPI version](https://img.shields.io/pypi/v/rifft-sdk)](https://pypi.org/project/rifft-sdk/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/rifft-dev/rifft/blob/main/LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/rifft-dev/rifft?style=social)](https://github.com/rifft-dev/rifft)
 
 Rifft helps developers debug multi-agent AI systems by making agent decisions, message flow, tool calls, and failure cascades visible across frameworks. It is intentionally opinionated: Rifft is for debugging multi-agent behavior, not for generic LLM observability.
@@ -14,6 +14,18 @@ JavaScript SDK:
 ```bash
 npm install @rifft-dev/rifft
 ```
+
+Python SDK:
+
+```bash
+pip install rifft-sdk
+```
+
+Python adapters:
+
+- CrewAI: [`rifft-crewai`](https://pypi.org/project/rifft-crewai/)
+- AutoGen: [`rifft-autogen`](https://pypi.org/project/rifft-autogen/)
+- MCP: [`rifft-mcp`](https://pypi.org/project/rifft-mcp/)
 
 ## Screenshot
 
@@ -48,7 +60,7 @@ npm install @rifft-dev/rifft
 ## 5-minute CrewAI quickstart
 
 ```python
-pip install rifft rifft-crewai
+pip install rifft-sdk rifft-crewai
 ```
 
 ```python
@@ -61,6 +73,13 @@ rifft.init(project_id="my-project", endpoint="http://localhost:4318")
 crew = Crew(agents=[...], tasks=[...])
 result = crew.kickoff()
 # Open http://localhost:3000 to see the trace
+```
+
+Other Python installs:
+
+```bash
+pip install rifft-sdk rifft-autogen
+pip install rifft-sdk rifft-mcp
 ```
 
 ## Self-host in under 5 minutes
