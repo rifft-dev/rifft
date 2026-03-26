@@ -1,4 +1,4 @@
-import { getCurrentAgentId, getCurrentTraceContext, span, withSpan } from "../../../sdk-js/src/index.js";
+import { getCurrentAgentId, getCurrentTraceContext, withSpan } from "rifft";
 
 export type McpToolSpan = {
   "mcp.tool_name": string;
