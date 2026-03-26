@@ -5,13 +5,13 @@ Rifft — cross-framework debugger for multi-agent AI systems.
 [![npm version](https://img.shields.io/badge/npm-0.1.0-red)](https://www.npmjs.com/package/rifft)
 [![PyPI version](https://img.shields.io/badge/PyPI-0.1.0-blue)](https://pypi.org/project/rifft/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](/Users/ned/Documents/GitHub/Rifft/LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/nedbpowell/rifft?style=social)](https://github.com/nedbpowell/rifft)
+[![GitHub stars](https://img.shields.io/github/stars/rifft-dev/rifft?style=social)](https://github.com/rifft-dev/rifft)
 
 Rifft helps developers debug multi-agent AI systems by making agent decisions, message flow, tool calls, and failure cascades visible across frameworks. It is intentionally opinionated: Rifft is for debugging multi-agent behavior, not for generic LLM observability.
 
 ## Screenshot
 
-Add a real communication-graph screenshot or GIF here before public launch.
+![Rifft communication graph showing 3 agents and MAST failure classification](docs/assets/readme-communication-graph.png)
 
 ## What Rifft does
 
@@ -60,9 +60,8 @@ result = crew.kickoff()
 ## Self-host in under 5 minutes
 
 ```bash
-git clone https://github.com/nedbpowell/rifft.git
+git clone https://github.com/rifft-dev/rifft.git
 cd rifft
-cp .env.example .env
 docker compose up -d --build
 open http://localhost:3000
 ```
@@ -72,7 +71,7 @@ Default local endpoints:
 - Web UI: `http://localhost:3000`
 - API: `http://localhost:4000`
 - Collector HTTP: `http://localhost:4318`
-- Collector gRPC placeholder: `localhost:4317`
+- Collector gRPC: `localhost:4317`
 
 ## Monorepo layout
 
@@ -96,7 +95,6 @@ rifft/
 
 ## Developer notes
 
-- Copy `.env.example` to `.env` for local development.
 - Current implementation tracker: [docs/implementation-tracker.md](/Users/ned/Documents/GitHub/Rifft/docs/implementation-tracker.md)
 - Current Phase 0/1 plan: [docs/phase-0-1-plan.md](/Users/ned/Documents/GitHub/Rifft/docs/phase-0-1-plan.md)
 - Use [scripts/cleanup-demo-traces.sh](/Users/ned/Documents/GitHub/Rifft/scripts/cleanup-demo-traces.sh) to remove stale pre-fix demo traces from local storage.
@@ -104,7 +102,7 @@ rifft/
 ## Docs
 
 - Architecture notes: [docs/architecture.md](/Users/ned/Documents/GitHub/Rifft/docs/architecture.md)
-- Docs/wiki placeholder: [GitHub Wiki](https://github.com/nedbpowell/rifft/wiki)
+- Docs/wiki placeholder: [GitHub Wiki](https://github.com/rifft-dev/rifft/wiki)
 - Contributing: [CONTRIBUTING.md](/Users/ned/Documents/GitHub/Rifft/CONTRIBUTING.md)
 
 ## License
