@@ -5,7 +5,7 @@ const clickhouseContainer = process.env.RIFFT_CLICKHOUSE_CONTAINER ?? "rifft-cli
 const postgresUser = process.env.POSTGRES_USER ?? "rifft";
 const postgresDb = process.env.POSTGRES_DB ?? "rifft";
 
-const traceId = "demo202603260001feedfacecafebeef";
+const traceId = "7f3c9d2ab41e6f9082c5d1a4b7e3c8f1";
 
 type SeedSpan = {
   trace_id: string;
