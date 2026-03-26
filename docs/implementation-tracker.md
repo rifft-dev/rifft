@@ -2,6 +2,8 @@
 
 This document maps the original Rifft product spec to the current repository state.
 
+For the forward-looking roadmap focused on making the product exceptional rather than merely complete, see [docs/exceptional-roadmap.md](/Users/ned/Documents/GitHub/Rifft/docs/exceptional-roadmap.md).
+
 Status keys:
 
 - `done` means implemented and verified in this repo

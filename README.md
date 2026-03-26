@@ -122,6 +122,7 @@ rifft/
 
 - Current implementation tracker: [docs/implementation-tracker.md](/Users/ned/Documents/GitHub/Rifft/docs/implementation-tracker.md)
 - Current Phase 0/1 plan: [docs/phase-0-1-plan.md](/Users/ned/Documents/GitHub/Rifft/docs/phase-0-1-plan.md)
+- Exceptional product roadmap: [docs/exceptional-roadmap.md](/Users/ned/Documents/GitHub/Rifft/docs/exceptional-roadmap.md)
 - Use [scripts/cleanup-demo-traces.sh](/Users/ned/Documents/GitHub/Rifft/scripts/cleanup-demo-traces.sh) to remove stale pre-fix demo traces from local storage.
 
 ## Docs
