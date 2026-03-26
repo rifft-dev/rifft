@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rifft-mcp"
+version = "0.1.0"
+description = "MCP adapter for Rifft"
+requires-python = ">=3.9"
+dependencies = ["rifft"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find_namespace]
+where = ["src"]
