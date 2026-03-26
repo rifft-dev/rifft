@@ -7,10 +7,8 @@ name = "rifft-crewai"
 version = "0.1.0"
 description = "CrewAI adapter for Rifft"
 requires-python = ">=3.9"
-dependencies = ["rifft"]
+dependencies = ["rifft-sdk"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-
-[tool.setuptools.packages.find_namespace]
-where = ["src"]
+packages = { find = { where = ["src"], namespaces = true } }
