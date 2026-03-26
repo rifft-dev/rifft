@@ -1,5 +1,5 @@
 {
-  "name": "rifft",
+  "name": "@rifft-dev/rifft",
   "version": "0.1.0",
   "description": "Cross-framework debugger SDK for multi-agent AI systems",
   "license": "MIT",

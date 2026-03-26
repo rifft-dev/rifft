@@ -5,7 +5,7 @@ TypeScript SDK for Rifft, the cross-framework debugger for multi-agent AI system
 ## Install
 
 ```bash
-npm install rifft
+npm install @rifft-dev/rifft
 ```
 
 ## Quickstart
