@@ -2,12 +2,18 @@
 
 Rifft — cross-framework debugger for multi-agent AI systems.
 
-[![npm version](https://img.shields.io/badge/npm-0.1.0-red)](https://www.npmjs.com/package/rifft)
+[![npm version](https://img.shields.io/npm/v/%40rifft-dev%2Frifft)](https://www.npmjs.com/package/@rifft-dev/rifft)
 [![PyPI version](https://img.shields.io/badge/PyPI-0.1.0-blue)](https://pypi.org/project/rifft/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](/Users/ned/Documents/GitHub/Rifft/LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/rifft-dev/rifft?style=social)](https://github.com/rifft-dev/rifft)
 
 Rifft helps developers debug multi-agent AI systems by making agent decisions, message flow, tool calls, and failure cascades visible across frameworks. It is intentionally opinionated: Rifft is for debugging multi-agent behavior, not for generic LLM observability.
+
+JavaScript SDK:
+
+```bash
+npm install @rifft-dev/rifft
+```
 
 ## Screenshot
 
