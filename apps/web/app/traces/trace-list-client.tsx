@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Command, CommandInput } from "@/components/ui/command";
@@ -47,6 +47,7 @@ const statusVariant = (status: TraceSummary["status"]) =>
   status === "error" ? "destructive" : "secondary";
 
 export function TraceListClient({ traces }: { traces: TraceSummary[] }) {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [framework, setFramework] = useState("all");
@@ -125,36 +126,55 @@ export function TraceListClient({ traces }: { traces: TraceSummary[] }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((trace) => (
-                <TableRow key={trace.trace_id} className="cursor-pointer hover:bg-muted/40">
-                  <TableCell>
-                    <Badge variant={statusVariant(trace.status)} className="capitalize">
-                      {trace.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    <Link href={`/traces/${trace.trace_id}`}>{trace.trace_id.slice(0, 12)}...</Link>
-                  </TableCell>
-                  <TableCell>{formatRelative(trace.started_at)}</TableCell>
-                  <TableCell>{trace.duration_ms}ms</TableCell>
-                  <TableCell>{trace.agent_count}</TableCell>
-                  <TableCell>{formatCurrency(trace.total_cost_usd)}</TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-2">
-                      {trace.framework.map((item) => (
-                        <Badge key={item} variant="outline">
-                          {item}
-                        </Badge>
-                      ))}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={trace.mast_failures.length > 0 ? "destructive" : "secondary"}>
-                      {trace.mast_failures.length}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {filtered.map((trace) => {
+                const href = `/traces/${trace.trace_id}`;
+
+                return (
+                  <TableRow
+                    key={trace.trace_id}
+                    className="cursor-pointer hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                    role="link"
+                    tabIndex={0}
+                    aria-label={`Open trace ${trace.trace_id}`}
+                    onClick={() => router.push(href)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        router.push(href);
+                      }
+                    }}
+                  >
+                    <TableCell>
+                      <Badge variant={statusVariant(trace.status)} className="capitalize">
+                        {trace.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {trace.trace_id.slice(0, 12)}...
+                    </TableCell>
+                    <TableCell>{formatRelative(trace.started_at)}</TableCell>
+                    <TableCell>{trace.duration_ms}ms</TableCell>
+                    <TableCell>{trace.agent_count}</TableCell>
+                    <TableCell>{formatCurrency(trace.total_cost_usd)}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-2">
+                        {trace.framework.map((item) => (
+                          <Badge key={item} variant="outline">
+                            {item}
+                          </Badge>
+                        ))}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={trace.mast_failures.length > 0 ? "destructive" : "secondary"}
+                      >
+                        {trace.mast_failures.length}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>

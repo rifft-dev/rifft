@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
 import {
   getAgentDetail,
   getForkDrafts,
@@ -7,6 +9,7 @@ import {
   getTraceTimeline,
 } from "../../lib/api";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { InteractiveTraceDetail } from "./interactive-trace-detail";
 
 const formatCurrency = (value: number) =>
@@ -41,7 +44,13 @@ export default async function TraceDetailPage({
     return (
       <div className="space-y-6 px-0 py-0">
         <section className="border-b bg-card px-6 py-6 lg:px-8">
-          <Badge variant="outline">Trace detail</Badge>
+          <Button asChild variant="ghost" size="sm" className="mb-4 -ml-3">
+            <Link href="/traces">
+              <ArrowLeft />
+              Back
+            </Link>
+          </Button>
+          {/* <Badge variant="outline">Trace detail</Badge> */}
           <h1 className="mt-4 font-mono text-3xl font-semibold tracking-tight lg:text-4xl">
             {trace.trace_id}
           </h1>
