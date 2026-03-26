@@ -3,20 +3,33 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "rifft"
+name = "rifft-sdk"
 version = "0.1.0"
 description = "Cross-framework debugger for multi-agent AI systems"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = "MIT"
+authors = [
+  { name = "rifft-dev", email = "hello@rifft.dev" }
+]
+keywords = ["ai", "agents", "debugging", "observability", "opentelemetry"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
 dependencies = [
   "opentelemetry-sdk>=1.30.0",
   "opentelemetry-exporter-otlp>=1.30.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/rifft-dev/rifft"
+Repository = "https://github.com/rifft-dev/rifft"
+Issues = "https://github.com/rifft-dev/rifft/issues"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
+packages = ["rifft"]
