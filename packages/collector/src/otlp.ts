@@ -75,6 +75,10 @@ export type TraceSummary = {
   totalCostUsd: number;
 };
 
+type NormalizeOptions = {
+  projectIdOverride?: string | null;
+};
+
 const fromHex = (value: string | undefined) => {
   if (!value) {
     return "";
@@ -152,7 +156,15 @@ const spanStatus = (code: number | undefined): "ok" | "error" | "unset" => {
   return "unset";
 };
 
-const extractProjectId = (attributes: Record<string, unknown>, resource: Record<string, unknown>) => {
+const extractProjectId = (
+  attributes: Record<string, unknown>,
+  resource: Record<string, unknown>,
+  projectIdOverride?: string | null,
+) => {
+  if (typeof projectIdOverride === "string" && projectIdOverride.length > 0) {
+    return projectIdOverride;
+  }
+
   const value =
     attributes["project_id"] ??
     attributes["rifft.project_id"] ??
@@ -178,7 +190,7 @@ const extractCost = (attributes: Record<string, unknown>) => {
   return Number.isFinite(numeric) ? numeric : 0;
 };
 
-export const normalizeEnvelope = (envelope: OtlpEnvelope) => {
+export const normalizeEnvelope = (envelope: OtlpEnvelope, options: NormalizeOptions = {}) => {
   const spans: NormalizedSpan[] = [];
 
   for (const resourceSpan of envelope.resourceSpans ?? []) {
@@ -209,7 +221,7 @@ export const normalizeEnvelope = (envelope: OtlpEnvelope) => {
           resource: JSON.stringify(resource),
           agent_id: extractAgentId(attributes),
           framework: extractFramework(attributes),
-          project_id: extractProjectId(attributes, resource),
+          project_id: extractProjectId(attributes, resource, options.projectIdOverride),
           numericCostUsd: extractCost(attributes),
         });
       }

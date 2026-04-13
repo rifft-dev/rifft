@@ -104,6 +104,7 @@ Default local endpoints:
 rifft/
 ├── apps/
 │   ├── api
+│   ├── site
 │   └── web
 ├── infra/
 │   └── docker
@@ -128,8 +129,38 @@ rifft/
 ## Docs
 
 - Architecture notes: [docs/architecture.md](/Users/ned/Documents/GitHub/Rifft/docs/architecture.md)
+- Cloud MVP spec: [docs/cloud-mvp.md](/Users/ned/Documents/GitHub/Rifft/docs/cloud-mvp.md)
+- Deployment checklist: [docs/deployment-checklist.md](/Users/ned/Documents/GitHub/Rifft/docs/deployment-checklist.md)
 - Docs/wiki placeholder: [GitHub Wiki](https://github.com/rifft-dev/rifft/wiki)
 - Contributing: [CONTRIBUTING.md](/Users/ned/Documents/GitHub/Rifft/CONTRIBUTING.md)
+- Marketing landing page: [apps/web/app/page.tsx](/Users/ned/Documents/GitHub/Rifft/apps/web/app/page.tsx)
+
+## Cloud billing env
+
+To enable the in-app Pro upgrade CTA after the first trace lands, set:
+
+```bash
+POLAR_ACCESS_TOKEN=...
+POLAR_PRO_PRODUCT_ID=...
+```
+
+The web app creates a Polar checkout session server-side and passes the Rifft `account_id` as `external_customer_id`, so the webhook can map the subscription back to the correct cloud account deterministically.
+
+To sync paid plan state back into Rifft Cloud, point Polar webhooks at:
+
+```bash
+POST /webhooks/polar
+```
+
+and set:
+
+```bash
+POLAR_WEBHOOK_SECRET=...
+```
+
+The API uses this webhook to store subscription state, switch Cloud Free vs Cloud Pro in settings, and keep project retention aligned with the paid plan.
+
+For paid users, the settings page also opens the Polar customer portal through a server-side customer session using the same `external_customer_id`, so subscription management stays deterministic too.
 
 ## License
 

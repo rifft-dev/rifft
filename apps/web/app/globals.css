@@ -108,6 +108,9 @@ body {
 
 body {
   @apply bg-background font-sans text-foreground antialiased;
+  background-image:
+    radial-gradient(circle at top left, hsl(var(--chart-1) / 0.05), transparent 24%),
+    radial-gradient(circle at bottom right, hsl(var(--chart-2) / 0.05), transparent 28%);
 }
 
 code,
@@ -116,8 +119,83 @@ pre,
   font-family: var(--font-geist-mono);
 }
 
+h1,
+h2,
+h3,
+.display-tight {
+  letter-spacing: -0.03em;
+}
+
+.page-enter {
+  animation: page-enter 320ms ease-out both;
+}
+
+.route-stage {
+  animation: route-stage-enter 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.section-fade {
+  animation: section-fade 420ms ease-out both;
+}
+
+.stagger-1 {
+  animation-delay: 60ms;
+}
+
+.stagger-2 {
+  animation-delay: 120ms;
+}
+
+.stagger-3 {
+  animation-delay: 180ms;
+}
+
+.surface-lift {
+  transition:
+    transform 220ms ease,
+    box-shadow 220ms ease,
+    border-color 220ms ease,
+    background-color 220ms ease;
+}
+
+.surface-lift:hover {
+  transform: translateY(-2px);
+}
+
 .react-flow__attribution {
   display: none;
+}
+
+.react-flow {
+  background-image:
+    radial-gradient(circle at center, hsl(var(--chart-1) / 0.06), transparent 38%),
+    linear-gradient(to bottom, hsl(var(--background)), hsl(var(--background)));
+}
+
+.react-flow__pane {
+  cursor: grab;
+}
+
+.react-flow__pane:active {
+  cursor: grabbing;
+}
+
+.react-flow__edge-path {
+  transition: stroke 180ms ease, opacity 180ms ease, stroke-width 180ms ease;
+}
+
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:focus .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke-width: 2.5px;
+}
+
+.react-flow__node {
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.react-flow__node:hover {
+  transform: translateY(-2px);
 }
 
 .react-flow__controls-button,
@@ -135,4 +213,56 @@ pre,
 .timeline-tab-height {
   height: calc(100vh - 14rem);
   min-height: 32rem;
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes route-stage-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes section-fade {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter,
+  .route-stage,
+  .section-fade,
+  .stagger-1,
+  .stagger-2,
+  .stagger-3 {
+    animation: none !important;
+  }
+
+  .surface-lift,
+  .surface-lift:hover,
+  .react-flow__edge-path,
+  .react-flow__node {
+    transition: none !important;
+    transform: none !important;
+  }
 }

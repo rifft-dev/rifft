@@ -4,10 +4,13 @@ import { z } from "zod";
 import { classifyTrace } from "./classify.js";
 import { normalizeEnvelope, type OtlpEnvelope } from "./otlp.js";
 import {
+  checkProjectIngestAllowance,
   ensureProject,
+  getProjectIdForApiKey,
   getProjectSettings,
   insertSpans,
   pgPool,
+  pruneProjectRetention,
   updateTraceFailures,
   upsertTraceSummary,
 } from "./storage.js";
@@ -20,6 +23,19 @@ const spanEnvelopeSchema = z.object({
 });
 
 const app = Fastify({ logger: true });
+
+const getBearerToken = (authorizationHeader?: string) => {
+  if (!authorizationHeader) {
+    return null;
+  }
+
+  const [scheme, token] = authorizationHeader.split(" ");
+  if (scheme?.toLowerCase() !== "bearer" || !token) {
+    return null;
+  }
+
+  return token;
+};
 
 app.get("/health", async () => ({
   status: "ok",
@@ -45,15 +61,67 @@ app.post("/v1/traces", async (request, reply) => {
     };
   }
 
-  const { spans, summaries } = normalizeEnvelope(parsed.data as OtlpEnvelope);
+  const bearerToken = getBearerToken(request.headers.authorization);
+  const authenticatedProjectId = bearerToken
+    ? await getProjectIdForApiKey(bearerToken)
+    : null;
+
+  if (bearerToken && !authenticatedProjectId) {
+    reply.code(401);
+    return {
+      error: "invalid_api_key",
+      message: "Collector could not verify the provided Rifft API key.",
+    };
+  }
+
+  const { spans, summaries } = normalizeEnvelope(parsed.data as OtlpEnvelope, {
+    projectIdOverride: authenticatedProjectId,
+  });
 
   if (spans.length === 0) {
-    reply.code(202);
-    return { partialSuccess: {} };
+    reply.code(400);
+    return {
+      error: "no_spans_extracted",
+      message:
+        "The collector accepted the OTLP envelope but could not extract any spans. Check the SDK wiring and payload shape.",
+    };
   }
 
   for (const summary of summaries) {
     await ensureProject(summary.projectId);
+  }
+
+  const spansByProject = new Map<string, { spanCount: number; traceIds: Set<string> }>();
+  for (const span of spans) {
+    const entry = spansByProject.get(span.project_id) ?? { spanCount: 0, traceIds: new Set<string>() };
+    entry.spanCount += 1;
+    entry.traceIds.add(span.trace_id);
+    spansByProject.set(span.project_id, entry);
+  }
+
+  for (const [projectId, projectSpans] of spansByProject.entries()) {
+    const allowance = await checkProjectIngestAllowance(
+      projectId,
+      projectSpans.spanCount,
+      [...projectSpans.traceIds],
+    );
+
+    if (!allowance.allowed) {
+      reply.code(429);
+      return {
+        error: "span_limit_exceeded",
+        message:
+          allowance.plan_key === "free"
+            ? "This Rifft Cloud Free project has reached its monthly span limit. Upgrade to Pro to continue ingesting."
+            : "This Rifft Cloud project has reached its monthly span limit.",
+        plan: allowance.plan_key,
+        usage: {
+          current: allowance.current_usage,
+          projected: allowance.projected_usage,
+          limit: allowance.limit,
+        },
+      };
+    }
   }
 
   await insertSpans(spans);
@@ -64,10 +132,12 @@ app.post("/v1/traces", async (request, reply) => {
     const traceSpans = spans.filter((span) => span.trace_id === summary.traceId);
     const failures = classifyTrace(traceSpans, projectSettings, summary.status);
     await updateTraceFailures(summary.traceId, failures);
+    await pruneProjectRetention(summary.projectId, projectSettings.retention_days);
   }
 
   request.log.info(
     {
+      authenticatedProjectId,
       resourceSpanCount: parsed.data.resourceSpans.length,
       storedSpanCount: spans.length,
       traceCount: summaries.length,

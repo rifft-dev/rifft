@@ -1,16 +1,31 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import Fastify from "fastify";
+import type { FastifyRequest } from "fastify";
 import { z } from "zod";
 import { closePools } from "./db.js";
+import { getBearerToken, getSupabaseAdminClient, isSupabaseConfigured } from "./supabase.js";
 import {
+  bootstrapCloudProject,
   createProject,
+  getAccessibleProject,
   getProject,
+  getDefaultProjectForUser,
   getAgentDetail,
+  regenerateProjectApiKey,
+  getCloudProjectUsageSummary,
+  getProjectBaseline,
+  getProjectInsights,
+  syncPolarSubscription,
+  getTraceProjectId,
   listForkDrafts,
+  listProjectsForUser,
   getTrace,
+  getTraceComparison,
   getTraceGraph,
   getTraceTimeline,
   listProjects,
   listTraces,
+  setProjectBaseline,
   upsertForkDraft,
   updateProjectSettings,
 } from "./queries.js";
@@ -22,6 +37,119 @@ const supabaseUrl = process.env.SUPABASE_URL ?? "";
 
 const app = Fastify({ logger: true });
 
+app.addContentTypeParser("application/json", { parseAs: "string" }, (request, body, done) => {
+  try {
+    const rawBody = typeof body === "string" ? body : body.toString("utf8");
+    (request as FastifyRequest & { rawBody?: string }).rawBody = rawBody;
+    done(null, JSON.parse(rawBody));
+  } catch (error) {
+    done(error as Error, undefined);
+  }
+});
+
+type AuthenticatedUser = {
+  id: string;
+  email: string | null;
+  name: string | null;
+};
+
+const getAuthenticatedUser = async (authorizationHeader?: string): Promise<AuthenticatedUser | null> => {
+  if (!isSupabaseConfigured) {
+    return null;
+  }
+
+  const token = getBearerToken(authorizationHeader);
+  if (!token) {
+    return null;
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error || !data.user) {
+    return null;
+  }
+
+  return {
+    id: data.user.id,
+    email: data.user.email ?? null,
+    name:
+      (data.user.user_metadata.full_name as string | undefined) ??
+      (data.user.user_metadata.name as string | undefined) ??
+      null,
+  };
+};
+
+const canAccessTrace = async (user: AuthenticatedUser | null, traceId: string) => {
+  const projectId = await getTraceProjectId(traceId);
+  if (!projectId) {
+    return false;
+  }
+
+  const project = await getProject(projectId);
+  if (!project) {
+    return false;
+  }
+
+  if (!user) {
+    return !project.account_id;
+  }
+
+  const accessibleProject = await getAccessibleProject(user.id, projectId);
+  return Boolean(accessibleProject);
+};
+
+const safeEqual = (left: string, right: string) => {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(leftBuffer, rightBuffer);
+};
+
+const verifyPolarWebhookSignature = (request: FastifyRequest & { rawBody?: string }) => {
+  const secret = process.env.POLAR_WEBHOOK_SECRET;
+  if (!secret) {
+    return false;
+  }
+
+  const body = request.rawBody ?? "";
+  const webhookId = request.headers["webhook-id"];
+  const webhookTimestamp = request.headers["webhook-timestamp"];
+  const webhookSignature = request.headers["webhook-signature"];
+
+  if (
+    typeof webhookId !== "string" ||
+    typeof webhookTimestamp !== "string" ||
+    typeof webhookSignature !== "string"
+  ) {
+    return false;
+  }
+
+  const signedContent = `${webhookId}.${webhookTimestamp}.${body}`;
+  const expected = createHmac("sha256", secret).update(signedContent).digest("base64");
+  const candidates = webhookSignature
+    .split(" ")
+    .flatMap((entry) => entry.split(","))
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      if (entry.startsWith("v1,")) {
+        return entry.slice(3);
+      }
+      if (entry.startsWith("v1=")) {
+        return entry.slice(3);
+      }
+      if (entry.startsWith("v1")) {
+        return entry.slice(2).replace(/^[=,]/, "");
+      }
+      return entry;
+    });
+
+  return candidates.some((candidate) => safeEqual(candidate, expected));
+};
+
 app.get("/health", async () => ({
   status: "ok",
   service: "api",
@@ -32,12 +160,79 @@ app.get("/health", async () => ({
   },
 }));
 
+app.post("/webhooks/polar", async (request, reply) => {
+  const typedRequest = request as FastifyRequest & { rawBody?: string };
+  if (!verifyPolarWebhookSignature(typedRequest)) {
+    reply.code(401);
+    return { error: "invalid_signature" };
+  }
+
+  const body = request.body as Record<string, unknown> | null;
+  const eventType =
+    (body && typeof body.type === "string" ? body.type : null) ??
+    (body && typeof body.event === "string" ? body.event : null);
+
+  if (!body || !eventType) {
+    reply.code(400);
+    return { error: "invalid_event" };
+  }
+
+  if (!eventType.startsWith("subscription.")) {
+    return { received: true, ignored: true };
+  }
+
+  const payload =
+    body.data && typeof body.data === "object" && !Array.isArray(body.data)
+      ? (body.data as Record<string, unknown>)
+      : body;
+
+  const result = await syncPolarSubscription(eventType, payload);
+  return {
+    received: true,
+    ...result,
+  };
+});
+
 app.get("/projects", async () => ({
   projects: await listProjects(),
 }));
 
+app.get("/cloud/me", async (request, reply) => {
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (!user) {
+    reply.code(401);
+    return { error: "unauthorized" };
+  }
+
+  const activeProject = await getDefaultProjectForUser(user.id);
+  return {
+    user,
+    active_project: activeProject,
+  };
+});
+
+app.get("/cloud/projects", async (request, reply) => {
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (!user) {
+    reply.code(401);
+    return { error: "unauthorized" };
+  }
+
+  return {
+    projects: await listProjectsForUser(user.id),
+  };
+});
+
 app.get("/projects/:id", async (request, reply) => {
-  const project = await getProject((request.params as { id: string }).id);
+  const projectId = (request.params as { id: string }).id;
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  const project = user
+    ? await getAccessibleProject(user.id, projectId)
+    : await getProject(projectId);
+  if (!user && project?.account_id) {
+    reply.code(404);
+    return { error: "not_found" };
+  }
   if (!project) {
     reply.code(404);
     return { error: "not_found" };
@@ -65,7 +260,24 @@ app.post("/projects", async (request, reply) => {
   return project;
 });
 
+app.post("/cloud/bootstrap", async (request, reply) => {
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (!user) {
+    reply.code(401);
+    return { error: "unauthorized" };
+  }
+
+  const project = await bootstrapCloudProject({
+    userId: user.id,
+    email: user.email,
+    name: user.name,
+  });
+
+  return { project };
+});
+
 app.patch("/projects/:id", async (request, reply) => {
+  const projectId = (request.params as { id: string }).id;
   const bodySchema = z.object({
     retention_days: z.number().int().min(7).max(3650).optional(),
     cost_threshold_usd: z.number().min(0).optional(),
@@ -81,7 +293,26 @@ app.patch("/projects/:id", async (request, reply) => {
     };
   }
 
-  const project = await updateProjectSettings((request.params as { id: string }).id, parsed.data);
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (user) {
+    const accessibleProject = await getAccessibleProject(user.id, projectId);
+    if (!accessibleProject) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+    if (!accessibleProject.permissions.can_update_settings) {
+      reply.code(403);
+      return { error: "forbidden" };
+    }
+  } else {
+    const project = await getProject(projectId);
+    if (project?.account_id) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+  }
+
+  const project = await updateProjectSettings(projectId, parsed.data);
   if (!project) {
     reply.code(404);
     return { error: "not_found" };
@@ -90,7 +321,147 @@ app.patch("/projects/:id", async (request, reply) => {
   return project;
 });
 
+app.post("/projects/:id/regenerate-api-key", async (request, reply) => {
+  const projectId = (request.params as { id: string }).id;
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (user) {
+    const accessibleProject = await getAccessibleProject(user.id, projectId);
+    if (!accessibleProject) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+    if (!accessibleProject.permissions.can_rotate_api_keys) {
+      reply.code(403);
+      return { error: "forbidden" };
+    }
+  } else {
+    const project = await getProject(projectId);
+    if (project?.account_id) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+  }
+
+  const project = await regenerateProjectApiKey(projectId);
+  if (!project) {
+    reply.code(404);
+    return { error: "not_found" };
+  }
+
+  return project;
+});
+
+app.get("/projects/:id/usage", async (request, reply) => {
+  const projectId = (request.params as { id: string }).id;
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (user) {
+    const accessibleProject = await getAccessibleProject(user.id, projectId);
+    if (!accessibleProject) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+  } else {
+    const project = await getProject(projectId);
+    if (project?.account_id) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+  }
+
+  const summary = await getCloudProjectUsageSummary(projectId);
+  if (!summary) {
+    reply.code(404);
+    return { error: "not_found" };
+  }
+
+  return summary;
+});
+
+app.get("/projects/:id/insights", async (request, reply) => {
+  const projectId = (request.params as { id: string }).id;
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (user) {
+    const accessibleProject = await getAccessibleProject(user.id, projectId);
+    if (!accessibleProject) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+  } else {
+    const project = await getProject(projectId);
+    if (project?.account_id) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+  }
+
+  return getProjectInsights(projectId);
+});
+
+app.get("/projects/:id/baseline", async (request, reply) => {
+  const projectId = (request.params as { id: string }).id;
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (user) {
+    const accessibleProject = await getAccessibleProject(user.id, projectId);
+    if (!accessibleProject) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+  } else {
+    const project = await getProject(projectId);
+    if (project?.account_id) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+  }
+
+  return {
+    baseline: await getProjectBaseline(projectId),
+  };
+});
+
+app.post("/projects/:id/baseline", async (request, reply) => {
+  const projectId = (request.params as { id: string }).id;
+  const bodySchema = z.object({
+    trace_id: z.string().min(1),
+  });
+  const parsed = bodySchema.safeParse(request.body);
+
+  if (!parsed.success) {
+    reply.code(400);
+    return {
+      error: "invalid_request",
+      message: parsed.error.message,
+    };
+  }
+
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (user) {
+    const accessibleProject = await getAccessibleProject(user.id, projectId);
+    if (!accessibleProject) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+  } else {
+    const project = await getProject(projectId);
+    if (project?.account_id) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+  }
+
+  const baseline = await setProjectBaseline(projectId, parsed.data.trace_id, user?.id ?? null);
+  if (!baseline) {
+    reply.code(400);
+    return { error: "invalid_trace" };
+  }
+
+  return {
+    baseline,
+  };
+});
+
 app.get("/projects/:id/traces", async (request, reply) => {
+  const projectId = (request.params as { id: string }).id;
   const querySchema = z.object({
     page: z.coerce.number().int().min(1).default(1),
     page_size: z.coerce.number().int().min(1).max(100).default(20),
@@ -109,8 +480,23 @@ app.get("/projects/:id/traces", async (request, reply) => {
     };
   }
 
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (user) {
+    const accessibleProject = await getAccessibleProject(user.id, projectId);
+    if (!accessibleProject) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+  } else {
+    const project = await getProject(projectId);
+    if (project?.account_id) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+  }
+
   const result = await listTraces({
-    projectId: (request.params as { id: string }).id,
+    projectId,
     page: parsed.data.page,
     pageSize: parsed.data.page_size,
     status: parsed.data.status,
@@ -127,7 +513,14 @@ app.get("/projects/:id/traces", async (request, reply) => {
 });
 
 app.get("/traces/:traceId", async (request, reply) => {
-  const trace = await getTrace((request.params as { traceId: string }).traceId);
+  const traceId = (request.params as { traceId: string }).traceId;
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (!(await canAccessTrace(user, traceId))) {
+    reply.code(404);
+    return { error: "not_found" };
+  }
+
+  const trace = await getTrace(traceId);
   if (!trace) {
     reply.code(404);
     return { error: "not_found" };
@@ -136,8 +529,69 @@ app.get("/traces/:traceId", async (request, reply) => {
   return trace;
 });
 
+app.get("/traces/:traceId/live", async (request, reply) => {
+  const traceId = (request.params as { traceId: string }).traceId;
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  const canAccess = await canAccessTrace(user, traceId);
+  if (!canAccess) {
+    reply.code(404);
+    return { error: "not_found" };
+  }
+
+  const [trace, graph, timeline] = await Promise.all([
+    getTrace(traceId),
+    getTraceGraph(traceId),
+    getTraceTimeline(traceId),
+  ]);
+
+  if (!trace || !graph || !timeline) {
+    reply.code(404);
+    return { error: "not_found" };
+  }
+
+  const now = Date.now();
+  const lastActivityAt = trace.updated_at ?? trace.ended_at;
+  const lastActivityMs = new Date(lastActivityAt).getTime();
+  const startedAtMs = new Date(trace.started_at).getTime();
+  const isRecentlyActive = now - lastActivityMs < 15_000;
+  const startedRecently = now - startedAtMs < 10 * 60_000;
+  const isLive = trace.status === "unset" || (isRecentlyActive && startedRecently);
+
+  return {
+    trace,
+    graph,
+    timeline,
+    live: {
+      is_live: isLive,
+      last_activity_at: lastActivityAt,
+    },
+  };
+});
+
+app.get("/traces/:traceId/comparison", async (request, reply) => {
+  const traceId = (request.params as { traceId: string }).traceId;
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  const canAccess = await canAccessTrace(user, traceId);
+  if (!canAccess) {
+    reply.code(404);
+    return { error: "not_found" };
+  }
+
+  const comparison = await getTraceComparison(traceId);
+  return {
+    comparison,
+  };
+});
+
 app.get("/traces/:traceId/graph", async (request, reply) => {
-  const graph = await getTraceGraph((request.params as { traceId: string }).traceId);
+  const traceId = (request.params as { traceId: string }).traceId;
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (!(await canAccessTrace(user, traceId))) {
+    reply.code(404);
+    return { error: "not_found" };
+  }
+
+  const graph = await getTraceGraph(traceId);
   if (!graph) {
     reply.code(404);
     return { error: "not_found" };
@@ -147,7 +601,14 @@ app.get("/traces/:traceId/graph", async (request, reply) => {
 });
 
 app.get("/traces/:traceId/timeline", async (request, reply) => {
-  const timeline = await getTraceTimeline((request.params as { traceId: string }).traceId);
+  const traceId = (request.params as { traceId: string }).traceId;
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (!(await canAccessTrace(user, traceId))) {
+    reply.code(404);
+    return { error: "not_found" };
+  }
+
+  const timeline = await getTraceTimeline(traceId);
   if (!timeline) {
     reply.code(404);
     return { error: "not_found" };
@@ -158,6 +619,12 @@ app.get("/traces/:traceId/timeline", async (request, reply) => {
 
 app.get("/traces/:traceId/fork-drafts", async (request, reply) => {
   const traceId = (request.params as { traceId: string }).traceId;
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (!(await canAccessTrace(user, traceId))) {
+    reply.code(404);
+    return { error: "not_found" };
+  }
+
   const trace = await getTrace(traceId);
   if (!trace) {
     reply.code(404);
@@ -184,6 +651,12 @@ app.put("/traces/:traceId/fork-drafts/:spanId", async (request, reply) => {
     };
   }
 
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (!(await canAccessTrace(user, params.traceId))) {
+    reply.code(404);
+    return { error: "not_found" };
+  }
+
   const trace = await getTrace(params.traceId);
   if (!trace) {
     reply.code(404);
@@ -201,6 +674,12 @@ app.put("/traces/:traceId/fork-drafts/:spanId", async (request, reply) => {
 
 app.get("/traces/:traceId/agents/:agentId", async (request, reply) => {
   const params = request.params as { traceId: string; agentId: string };
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (!(await canAccessTrace(user, params.traceId))) {
+    reply.code(404);
+    return { error: "not_found" };
+  }
+
   const detail = await getAgentDetail(params.traceId, params.agentId);
   if (!detail) {
     reply.code(404);
@@ -212,6 +691,13 @@ app.get("/traces/:traceId/agents/:agentId", async (request, reply) => {
 
 process.on("SIGINT", () => void closePools());
 process.on("SIGTERM", () => void closePools());
+
+if (
+  (process.env.POLAR_ACCESS_TOKEN || process.env.POLAR_PRO_PRODUCT_ID) &&
+  !process.env.POLAR_WEBHOOK_SECRET
+) {
+  throw new Error("POLAR_WEBHOOK_SECRET must be set when Polar billing is enabled");
+}
 
 app.listen({ host: "0.0.0.0", port }).catch((error) => {
   app.log.error(error);

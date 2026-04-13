@@ -1,6 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "ignoreDeprecations": "6.0",
     "jsx": "preserve",
     "noEmit": true,
     "incremental": true,
@@ -21,7 +22,8 @@
       "esnext"
     ],
     "allowJs": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "allowArbitraryExtensions": true
   },
   "include": [
     "**/*.ts",

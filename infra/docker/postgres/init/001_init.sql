@@ -3,7 +3,6 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  api_key TEXT NOT NULL UNIQUE,
   retention_days INTEGER NOT NULL DEFAULT 30,
   cost_threshold_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
   timeout_threshold_ms INTEGER NOT NULL DEFAULT 0,
@@ -43,10 +42,35 @@ CREATE TABLE IF NOT EXISTS fork_drafts (
 CREATE INDEX IF NOT EXISTS fork_drafts_trace_updated_at_idx
   ON fork_drafts (trace_id, updated_at DESC);
 
-INSERT INTO projects (id, name, api_key)
+CREATE TABLE IF NOT EXISTS api_keys (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL DEFAULT 'default',
+  token TEXT NOT NULL UNIQUE,
+  last_used_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS api_keys_project_id_idx
+  ON api_keys (project_id);
+
+CREATE INDEX IF NOT EXISTS api_keys_token_active_idx
+  ON api_keys (token)
+  WHERE revoked_at IS NULL;
+
+INSERT INTO projects (id, name)
 VALUES (
   'default',
-  'Default Project',
-  encode(gen_random_bytes(24), 'hex')
+  'Default Project'
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO api_keys (id, project_id, name, token)
+VALUES (
+  'key_default',
+  'default',
+  'default',
+  'rft_live_default_local_dev'
 )
 ON CONFLICT (id) DO NOTHING;
