@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import Fastify from "fastify";
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
-import { closePools } from "./db.js";
+import { closePools, pgPool } from "./db.js";
 import { getBearerToken, getSupabaseAdminClient, isSupabaseConfigured } from "./supabase.js";
 import {
   bootstrapCloudProject,
@@ -28,6 +28,11 @@ import {
   setProjectBaseline,
   upsertForkDraft,
   updateProjectSettings,
+  listProjectMembers,
+  addProjectMember,
+  removeProjectMember,
+  getAlertCandidatesForTrace,
+  consumePendingInvites,
 } from "./queries.js";
 
 const port = Number(process.env.PORT ?? 4000);
@@ -272,6 +277,10 @@ app.post("/cloud/bootstrap", async (request, reply) => {
     email: user.email,
     name: user.name,
   });
+
+  if (user.email) {
+    await consumePendingInvites(user.id, user.email);
+  }
 
   return { project };
 });
@@ -687,6 +696,152 @@ app.get("/traces/:traceId/agents/:agentId", async (request, reply) => {
   }
 
   return detail;
+});
+
+const dispatchFatalFailureAlert = async (traceId: string) => {
+  const alertWebhookUrl = process.env.ALERT_WEBHOOK_URL;
+  const candidates = await getAlertCandidatesForTrace(traceId);
+  if (!candidates) {
+    return;
+  }
+
+  const payload = {
+    event: "trace.fatal_failure",
+    trace_id: candidates.trace_id,
+    project_id: candidates.project_id,
+    project_name: candidates.project_name,
+    started_at: candidates.started_at,
+    total_cost_usd: candidates.total_cost_usd,
+    fatal_failures: candidates.fatal_failures.map((f: { mode: string; agent_id: string | null; explanation: string }) => ({
+      mode: f.mode,
+      agent_id: f.agent_id,
+      explanation: f.explanation,
+    })),
+    trace_url: `${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.rifft.dev"}/traces/${traceId}`,
+  };
+
+  if (alertWebhookUrl) {
+    await fetch(alertWebhookUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    }).catch((error) => {
+      app.log.warn({ error, traceId }, "Alert webhook dispatch failed");
+    });
+  }
+};
+
+app.post("/internal/traces/:traceId/alert", async (request, reply) => {
+  const internalSecret = process.env.INTERNAL_API_SECRET;
+  if (internalSecret) {
+    const provided = request.headers["x-internal-secret"];
+    if (provided !== internalSecret) {
+      reply.code(401);
+      return { error: "unauthorized" };
+    }
+  }
+
+  const traceId = (request.params as { traceId: string }).traceId;
+  await dispatchFatalFailureAlert(traceId);
+  return { ok: true };
+});
+
+app.get("/projects/:id/members", async (request, reply) => {
+  const projectId = (request.params as { id: string }).id;
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (!user) {
+    reply.code(401);
+    return { error: "unauthorized" };
+  }
+
+  const accessibleProject = await getAccessibleProject(user.id, projectId);
+  if (!accessibleProject) {
+    reply.code(404);
+    return { error: "not_found" };
+  }
+
+  return { members: await listProjectMembers(projectId) };
+});
+
+app.post("/projects/:id/members", async (request, reply) => {
+  const projectId = (request.params as { id: string }).id;
+  const bodySchema = z.object({
+    email: z.string().email(),
+    role: z.literal("member").default("member"),
+  });
+  const parsed = bodySchema.safeParse(request.body);
+
+  if (!parsed.success) {
+    reply.code(400);
+    return { error: "invalid_request", message: parsed.error.message };
+  }
+
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (!user) {
+    reply.code(401);
+    return { error: "unauthorized" };
+  }
+
+  const result = await addProjectMember(projectId, user.id, parsed.data.email);
+
+  if (!result.ok) {
+    const status = result.reason === "forbidden" ? 403
+      : result.reason === "already_member" ? 409
+      : result.reason === "cannot_invite_self" ? 422
+      : result.reason === "member_limit_reached" ? 403
+      : 400;
+    reply.code(status);
+    return { error: result.reason };
+  }
+
+  reply.code(201);
+  return { ok: true, pending: result.reason === "pending" };
+});
+
+app.delete("/projects/:id/members", async (request, reply) => {
+  const projectId = (request.params as { id: string }).id;
+  const bodySchema = z.union([
+    z.object({ user_id: z.string().min(1) }),
+    z.object({ pending_email: z.string().email() }),
+  ]);
+  const parsed = bodySchema.safeParse(request.body);
+
+  if (!parsed.success) {
+    reply.code(400);
+    return { error: "invalid_request", message: parsed.error.message };
+  }
+
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (!user) {
+    reply.code(401);
+    return { error: "unauthorized" };
+  }
+
+  const accessibleProject = await getAccessibleProject(user.id, projectId);
+  if (!accessibleProject?.permissions.can_update_settings) {
+    reply.code(403);
+    return { error: "forbidden" };
+  }
+
+  if ("pending_email" in parsed.data) {
+    await pgPool.query(
+      `DELETE FROM pending_project_invites WHERE project_id = $1 AND invitee_email = $2`,
+      [projectId, parsed.data.pending_email],
+    );
+    return { ok: true };
+  }
+
+  const result = await removeProjectMember(user.id, projectId, parsed.data.user_id);
+
+  if (!result.ok) {
+    const status = result.reason === "forbidden" ? 403
+      : result.reason === "cannot_remove_owner" ? 422
+      : 400;
+    reply.code(status);
+    return { error: result.reason };
+  }
+
+  return { ok: true };
 });
 
 process.on("SIGINT", () => void closePools());

@@ -668,6 +668,17 @@ const toProjectRecord = (
 const toApiKeyToken = () => `rft_live_${randomBytes(18).toString("hex")}`;
 
 const getCloudPlanForRetention = (retentionDays: number) => {
+  if (retentionDays >= 365) {
+    return {
+      key: "team" as const,
+      name: "Cloud Team",
+      monthlySpanLimit: 2_000_000,
+      retentionDays: 365,
+      overagePricePer100kUsd: 5,
+      support: "priority",
+    };
+  }
+
   if (retentionDays >= 90) {
     return {
       key: "pro" as const,
@@ -690,6 +701,10 @@ const getCloudPlanForRetention = (retentionDays: number) => {
 };
 
 const getCloudPlanForKey = (planKey: string) => {
+  if (planKey === "team") {
+    return getCloudPlanForRetention(365);
+  }
+
   if (planKey === "pro") {
     return getCloudPlanForRetention(90);
   }
@@ -2248,24 +2263,73 @@ export const upsertForkDraft = async (traceId: string, spanId: string, payload: 
   } satisfies ForkDraft;
 };
 
-export const listProjectMembers = async (projectId: string) => {
+let pendingInvitesTableEnsured = false;
+
+const ensurePendingInvitesTable = async () => {
+  if (pendingInvitesTableEnsured) {
+    return;
+  }
+
   await ensureCloudMemberships();
 
-  const result = await pgPool.query(
-    `
-      SELECT user_id, user_email, role
-      FROM project_memberships
-      WHERE project_id = $1
-      ORDER BY role DESC, user_email ASC
-    `,
-    [projectId],
-  );
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS pending_project_invites (
+      id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      inviter_user_id TEXT NOT NULL,
+      invitee_email TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (project_id, invitee_email)
+    )
+  `);
+  await pgPool.query(`
+    CREATE INDEX IF NOT EXISTS pending_project_invites_email_idx
+      ON pending_project_invites (invitee_email)
+  `);
 
-  return result.rows.map((row: QueryResultRow) => ({
+  pendingInvitesTableEnsured = true;
+};
+
+export const listProjectMembers = async (projectId: string) => {
+  await ensureCloudMemberships();
+  await ensurePendingInvitesTable();
+
+  const [membersResult, pendingResult] = await Promise.all([
+    pgPool.query(
+      `
+        SELECT user_id, user_email, role
+        FROM project_memberships
+        WHERE project_id = $1
+        ORDER BY role DESC, user_email ASC
+      `,
+      [projectId],
+    ),
+    pgPool.query(
+      `
+        SELECT invitee_email
+        FROM pending_project_invites
+        WHERE project_id = $1
+        ORDER BY created_at ASC
+      `,
+      [projectId],
+    ),
+  ]);
+
+  const members = membersResult.rows.map((row: QueryResultRow) => ({
     user_id: row.user_id as string,
     user_email: (row.user_email as string | null) ?? null,
     role: (row.role === "owner" ? "owner" : "member") as "owner" | "member",
+    status: "active" as const,
   }));
+
+  const pending = pendingResult.rows.map((row: QueryResultRow) => ({
+    user_id: null,
+    user_email: row.invitee_email as string,
+    role: "member" as const,
+    status: "pending" as const,
+  }));
+
+  return [...members, ...pending];
 };
 
 export const addProjectMember = async (
@@ -2274,10 +2338,51 @@ export const addProjectMember = async (
   inviteeEmail: string,
 ) => {
   await ensureCloudMemberships();
+  await ensurePendingInvitesTable();
 
   const accessContext = await getProjectAccessContext(inviterUserId, projectId);
   if (!accessContext?.permissions.can_update_settings) {
     return { ok: false, reason: "forbidden" as const };
+  }
+
+  // Block self-invite
+  const inviterAccount = await pgPool.query(
+    `SELECT owner_email FROM accounts WHERE id = (
+      SELECT account_id FROM projects WHERE id = $1 LIMIT 1
+    ) LIMIT 1`,
+    [projectId],
+  );
+  const inviterEmail = (inviterAccount.rows[0]?.owner_email as string | null) ?? null;
+  if (inviterEmail && inviterEmail.toLowerCase() === inviteeEmail.toLowerCase()) {
+    return { ok: false, reason: "cannot_invite_self" as const };
+  }
+
+  // Enforce free tier member limit (max 1 additional member)
+  const accountId = await getProjectAccountId(projectId);
+  if (accountId) {
+    const subscription = await getCurrentSubscriptionForAccount(accountId);
+    const activePlanKey =
+      subscription && isActiveSubscriptionStatus(subscription.status)
+        ? subscription.plan_key
+        : "free";
+    if (activePlanKey === "free") {
+      const memberCount = await pgPool.query(
+        `SELECT COUNT(*) AS total FROM project_memberships
+         WHERE project_id = $1 AND role = 'member'`,
+        [projectId],
+      );
+      const pendingCount = await pgPool.query(
+        `SELECT COUNT(*) AS total FROM pending_project_invites
+         WHERE project_id = $1`,
+        [projectId],
+      );
+      const totalNonOwners =
+        Number(memberCount.rows[0]?.total ?? 0) +
+        Number(pendingCount.rows[0]?.total ?? 0);
+      if (totalNonOwners >= 1) {
+        return { ok: false, reason: "member_limit_reached" as const };
+      }
+    }
   }
 
   const existing = await pgPool.query(
@@ -2306,7 +2411,15 @@ export const addProjectMember = async (
   );
 
   if (userResult.rowCount === 0 || !userResult.rows[0]) {
-    return { ok: false, reason: "user_not_found" as const };
+    await pgPool.query(
+      `
+        INSERT INTO pending_project_invites (project_id, inviter_user_id, invitee_email)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (project_id, invitee_email) DO NOTHING
+      `,
+      [projectId, inviterUserId, inviteeEmail],
+    );
+    return { ok: true, reason: "pending" as const };
   }
 
   const inviteeUserId = userResult.rows[0].id as string;
@@ -2321,6 +2434,43 @@ export const addProjectMember = async (
   );
 
   return { ok: true, reason: null };
+};
+
+export const consumePendingInvites = async (userId: string, email: string) => {
+  await ensurePendingInvitesTable();
+
+  const pending = await pgPool.query(
+    `
+      SELECT project_id
+      FROM pending_project_invites
+      WHERE invitee_email = $1
+    `,
+    [email],
+  );
+
+  if (pending.rowCount === 0) {
+    return;
+  }
+
+  for (const row of pending.rows) {
+    const projectId = row.project_id as string;
+    await pgPool.query(
+      `
+        INSERT INTO project_memberships (project_id, user_id, user_email, role)
+        VALUES ($1, $2, $3, 'member')
+        ON CONFLICT (project_id, user_id) DO NOTHING
+      `,
+      [projectId, userId, email],
+    );
+  }
+
+  await pgPool.query(
+    `
+      DELETE FROM pending_project_invites
+      WHERE invitee_email = $1
+    `,
+    [email],
+  );
 };
 
 export const removeProjectMember = async (
@@ -2349,4 +2499,46 @@ export const removeProjectMember = async (
   );
 
   return { ok: true, reason: null };
+};
+
+export const getAlertCandidatesForTrace = async (traceId: string) => {
+  const trace = await getTrace(traceId);
+  if (!trace) {
+    return null;
+  }
+
+  const fatalFailures = trace.mast_failures.filter(
+    (f: { severity: string }) => f.severity === "fatal",
+  );
+
+  if (fatalFailures.length === 0) {
+    return null;
+  }
+
+  const project = await getProject(trace.project_id);
+  if (!project?.account_id) {
+    return null;
+  }
+
+  const accountResult = await pgPool.query(
+    `
+      SELECT owner_email
+      FROM accounts
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [project.account_id],
+  );
+
+  const ownerEmail = (accountResult.rows[0]?.owner_email as string | null) ?? null;
+
+  return {
+    trace_id: traceId,
+    project_id: trace.project_id,
+    project_name: project.name,
+    owner_email: ownerEmail,
+    fatal_failures: fatalFailures,
+    started_at: trace.started_at,
+    total_cost_usd: trace.total_cost_usd,
+  };
 };

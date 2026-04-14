@@ -13,19 +13,6 @@ export const metadata: Metadata = {
 
 const pricingCards = [
   {
-    eyebrow: "Self-hosted",
-    title: "OSS",
-    amount: "Free forever",
-    description: "Run Rifft inside your own infrastructure with the full open-source stack.",
-    features: [
-      "Unlimited spans, no limits",
-      "MIT licensed, full source available",
-      "Docker Compose, one command to start",
-      "Community support",
-    ],
-    cta: { href: "https://github.com/rifft-dev/rifft", label: "View on GitHub", variant: "outline" as const },
-  },
-  {
     eyebrow: "Cloud Free",
     title: "Free",
     amount: "$0 / month",
@@ -50,10 +37,25 @@ const pricingCards = [
       "90-day trace retention",
       "Fork mode — edit agent state mid-replay",
       "Cross-trace pattern analysis",
+      "Unlimited team members",
       "Email support",
       "$5 per 100K spans above 500K",
     ],
     cta: { href: "/auth?plan=pro&next=%2Fonboarding", label: "Get started", variant: "outline" as const },
+  },
+  {
+    eyebrow: "Cloud Scale",
+    title: "Scale",
+    amount: "$99 / month",
+    description: "For teams running agents at serious volume who need a full year of history and priority support.",
+    features: [
+      "2M spans per month",
+      "1-year trace retention",
+      "Everything in Pro",
+      "Priority support",
+      "$5 per 100K spans above 2M",
+    ],
+    cta: { href: "/auth?plan=team&next=%2Fonboarding", label: "Get started", variant: "outline" as const },
   },
 ];
 
@@ -165,10 +167,6 @@ export default function LandingPage() {
       <main>
         {/* Hero */}
         <section className="section-fade mx-auto max-w-5xl px-6 py-24 text-center lg:px-8">
-          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.08em] text-emerald-400">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            Cloud free · Self-hosted forever
-          </div>
           <h1 className="mt-8 text-5xl font-normal tracking-[-0.04em] text-white lg:text-7xl">
             Stop guessing
             <br />
@@ -377,6 +375,52 @@ export default function LandingPage() {
                 </CardContent>
               </Card>
             ))}
+          </div>
+        </section>
+
+        <div className="border-t border-white/10" />
+
+        {/* Self-hosted */}
+        <section className="mx-auto max-w-5xl px-6 py-20 lg:px-8">
+          <p className="text-center text-[11px] uppercase tracking-[0.12em] text-zinc-500">Self-hosted</p>
+          <h2 className="mt-4 text-center text-4xl font-normal tracking-[-0.03em] text-white">
+            Want full control? Run it yourself.
+          </h2>
+          <p className="mx-auto mt-5 max-w-2xl text-center text-base font-light leading-7 text-zinc-300">
+            The full Rifft stack is MIT licensed and open source. One command to start, no limits, no data leaving your infrastructure.
+          </p>
+          <div className="mx-auto mt-10 max-w-xl rounded-3xl border border-white/10 bg-[#111113] p-8">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-4">
+                <div className="inline-flex w-fit rounded-full border border-white/10 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.08em] text-zinc-500">
+                  OSS
+                </div>
+                <ul className="space-y-2 text-sm text-zinc-300">
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+                    <span>Unlimited spans, no limits</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+                    <span>MIT licensed, full source available</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+                    <span>Docker Compose, one command to start</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+                    <span>Community support</span>
+                  </li>
+                </ul>
+              </div>
+              <div className="shrink-0">
+                <div className="text-3xl tracking-[-0.04em] text-white">Free forever</div>
+                <Button asChild variant="outline" className="mt-4 border-white/15 bg-transparent text-white hover:bg-white/5">
+                  <a href="https://github.com/rifft-dev/rifft">View on GitHub</a>
+                </Button>
+              </div>
+            </div>
           </div>
         </section>
 
