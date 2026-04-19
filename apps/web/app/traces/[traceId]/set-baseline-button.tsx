@@ -10,11 +10,16 @@ import { setProjectBaseline } from "../../lib/client-api";
 type Props = {
   traceId: string;
   isCurrentBaseline: boolean;
+  canUpdate: boolean;
 };
 
-export function SetBaselineButton({ traceId, isCurrentBaseline }: Props) {
+export function SetBaselineButton({ traceId, isCurrentBaseline, canUpdate }: Props) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
+
+  if (!canUpdate) {
+    return null;
+  }
 
   return (
     <Button

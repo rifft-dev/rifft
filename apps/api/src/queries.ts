@@ -512,8 +512,9 @@ const buildCausalAttribution = (
   const chain: string[] = [failingAgentId];
   const visitedAgents = new Set<string>([failingAgentId]);
   let cursor = failingAgentId;
+  let maxIterations = communicationSpans.length + 1;
 
-  while (true) {
+  while (maxIterations-- > 0) {
     const latestInbound = [...spansByTime]
       .reverse()
       .find((span) => span.target_agent_id === cursor && !visitedAgents.has(span.source_agent_id));
@@ -538,6 +539,168 @@ const buildCausalAttribution = (
     failing_agent_id: failingAgentId,
     causal_chain: chain,
     explanation,
+  };
+};
+
+type HydratedTrace = NonNullable<Awaited<ReturnType<typeof getTrace>>>;
+
+const buildTraceGraph = (trace: HydratedTrace) => {
+  const spans = trace.spans;
+  const communicationSpans = trace.communication_spans;
+  const agentSpans = spans.filter((span) => Boolean(span.agent_id));
+  const nodeMap = new Map<
+    string,
+    { id: string; framework: string; status: string; cost_usd: number; duration_ms: number; root_cause: boolean }
+  >();
+  const edgeMap = new Map<
+    string,
+    { source: string; target: string; message_count: number; first_message_at: string; status: string; duration_ms: number }
+  >();
+
+  for (const span of agentSpans) {
+    const agentId = span.agent_id;
+    if (!agentId) {
+      continue;
+    }
+
+    const existing = nodeMap.get(agentId);
+    const attributes = span.attributes as Record<string, unknown>;
+    const cost = Number(attributes["cost_usd"] ?? attributes["llm.cost_usd"] ?? 0) || 0;
+
+    if (!existing) {
+      nodeMap.set(agentId, {
+        id: agentId,
+        framework: span.framework,
+        status: span.status,
+        cost_usd: cost,
+        duration_ms: Number(span.duration_ms),
+        root_cause: trace.causal_attribution.root_cause_agent_id === agentId,
+      });
+      continue;
+    }
+
+    existing.duration_ms += Number(span.duration_ms);
+    existing.cost_usd += cost;
+    existing.status =
+      existing.status === "error" || span.status === "error"
+        ? "error"
+        : existing.status === "ok" || span.status === "ok"
+          ? "ok"
+          : "unset";
+  }
+
+  for (const span of communicationSpans) {
+    const key = `${span.source_agent_id}->${span.target_agent_id}`;
+    const existing = edgeMap.get(key);
+
+    if (!existing) {
+      edgeMap.set(key, {
+        source: span.source_agent_id,
+        target: span.target_agent_id,
+        message_count: 1,
+        first_message_at: toIsoTimestamp(span.start_time),
+        status: span.status,
+        duration_ms: Number(span.duration_ms),
+      });
+      continue;
+    }
+
+    existing.message_count += 1;
+    existing.duration_ms += Number(span.duration_ms);
+    existing.status =
+      existing.status === "error" || span.status === "error"
+        ? "error"
+        : existing.status === "ok" || span.status === "ok"
+          ? "ok"
+          : "unset";
+  }
+
+  return {
+    nodes: [...nodeMap.values()],
+    edges: [...edgeMap.values()],
+    causal_attribution: trace.causal_attribution,
+    communication_spans: communicationSpans.map((span) => ({
+      span_id: span.span_id,
+      source_agent_id: span.source_agent_id,
+      target_agent_id: span.target_agent_id,
+      message: span.message,
+      protocol: span.protocol,
+      start_time: span.start_time,
+      end_time: span.end_time,
+      duration_ms: span.duration_ms,
+      status: span.status,
+    })),
+  };
+};
+
+const buildTraceTimeline = (trace: HydratedTrace) => {
+  const traceStart = new Date(trace.started_at).getTime();
+  const grouped = new Map<string, { agent_id: string; start_ms: number; end_ms: number; status: string }>();
+
+  for (const span of trace.spans) {
+    if (!span.agent_id) {
+      continue;
+    }
+
+    const startMs = new Date(span.start_time).getTime() - traceStart;
+    const endMs = new Date(span.end_time).getTime() - traceStart;
+    const existing = grouped.get(span.agent_id);
+
+    if (!existing) {
+      grouped.set(span.agent_id, {
+        agent_id: span.agent_id,
+        start_ms: startMs,
+        end_ms: endMs,
+        status: span.status,
+      });
+      continue;
+    }
+
+    existing.start_ms = Math.min(existing.start_ms, startMs);
+    existing.end_ms = Math.max(existing.end_ms, endMs);
+    existing.status =
+      existing.status === "error" || span.status === "error"
+        ? "error"
+        : existing.status === "ok" || span.status === "ok"
+          ? "ok"
+          : "unset";
+  }
+
+  return {
+    agents: [...grouped.values()].map((agent) => ({
+      agent_id: agent.agent_id,
+      start_ms: agent.start_ms,
+      end_ms: agent.end_ms,
+      duration_ms: Math.max(0, agent.end_ms - agent.start_ms),
+      status: agent.status,
+    })),
+    spans: trace.spans.map((span) => ({
+      span_id: span.span_id,
+      agent_id: span.agent_id,
+      name: span.name,
+      start_ms: new Date(span.start_time).getTime() - traceStart,
+      end_ms: new Date(span.end_time).getTime() - traceStart,
+      duration_ms: span.duration_ms,
+      status: span.status,
+      framework: span.framework,
+      span_type:
+        typeof (span.attributes as Record<string, unknown>)["tool.name"] === "string" ||
+        typeof (span.attributes as Record<string, unknown>)["mcp.tool_name"] === "string"
+          ? "tool_call"
+          : "agent_span",
+    })),
+    communication_spans: trace.communication_spans.map((span) => ({
+      span_id: span.span_id,
+      source_agent_id: span.source_agent_id,
+      target_agent_id: span.target_agent_id,
+      message: span.message,
+      protocol: span.protocol,
+      start_ms: new Date(span.start_time).getTime() - traceStart,
+      end_ms: new Date(span.end_time).getTime() - traceStart,
+      duration_ms: span.duration_ms,
+      status: span.status,
+      framework: span.framework,
+    })),
   };
 };
 
@@ -653,6 +816,7 @@ const toProjectRecord = (
   id: row.id as string,
   name: row.name as string,
   account_id: (row.account_id as string | null) ?? null,
+  owner_email: (row.owner_email as string | null) ?? null,
   api_key: apiKey,
   project_role: accessContext?.projectRole ?? null,
   account_role: accessContext?.accountRole ?? null,
@@ -670,8 +834,8 @@ const toApiKeyToken = () => `rft_live_${randomBytes(18).toString("hex")}`;
 const getCloudPlanForRetention = (retentionDays: number) => {
   if (retentionDays >= 365) {
     return {
-      key: "team" as const,
-      name: "Cloud Team",
+      key: "scale" as const,
+      name: "Cloud Scale",
       monthlySpanLimit: 2_000_000,
       retentionDays: 365,
       overagePricePer100kUsd: 5,
@@ -701,7 +865,7 @@ const getCloudPlanForRetention = (retentionDays: number) => {
 };
 
 const getCloudPlanForKey = (planKey: string) => {
-  if (planKey === "team") {
+  if (planKey === "scale") {
     return getCloudPlanForRetention(365);
   }
 
@@ -710,14 +874,6 @@ const getCloudPlanForKey = (planKey: string) => {
   }
 
   return getCloudPlanForRetention(14);
-};
-
-const getPlanKeyForSubscriptionStatus = (status: string) => {
-  if (["active", "trialing"].includes(status)) {
-    return "pro";
-  }
-
-  return "free";
 };
 
 const isActiveSubscriptionStatus = (status: string) => ["active", "trialing"].includes(status);
@@ -866,7 +1022,7 @@ export const bootstrapCloudProject = async ({ userId, email, name }: CloudBootst
   await ensureApiKeysTable();
 
   const accountName = name?.trim() || email?.split("@")[0] || "Rifft Cloud";
-  const accountId = `acct-${slugifyAccountId(email?.split("@")[0] ?? userId.slice(0, 8))}`;
+  const accountId = `acct-${slugifyAccountId(userId.slice(0, 12))}`;
 
   await pgPool.query(
     `
@@ -897,10 +1053,13 @@ export const bootstrapCloudProject = async ({ userId, email, name }: CloudBootst
       FROM projects p
       JOIN project_memberships pm ON pm.project_id = p.id
       WHERE pm.user_id = $1
-      ORDER BY created_at ASC
+        AND p.account_id = $2
+      ORDER BY
+        p.created_at ASC,
+        p.id ASC
       LIMIT 1
     `,
-    [userId],
+    [userId, accountId],
   );
 
   if (existing.rowCount && existing.rows[0]) {
@@ -918,10 +1077,8 @@ export const bootstrapCloudProject = async ({ userId, email, name }: CloudBootst
     name?.trim() ||
     email?.split("@")[0]?.replace(/[._-]+/g, " ") ||
     "Rifft Cloud";
-  const safeBaseId = slugifyProjectId(
-    `cloud-${email?.split("@")[0] ?? userId.slice(0, 8)}`,
-  );
-  const projectId = safeBaseId.length > 0 ? safeBaseId : `cloud-${Date.now()}`;
+  const safeBaseId = slugifyProjectId(`cloud-${userId.slice(0, 8)}-${randomBytes(4).toString("hex")}`);
+  const projectId = safeBaseId.length > 0 ? safeBaseId : `cloud-${Date.now()}-${randomBytes(4).toString("hex")}`;
 
   const result = await pgPool.query(
     `
@@ -934,12 +1091,6 @@ export const bootstrapCloudProject = async ({ userId, email, name }: CloudBootst
         owner_email
       )
       VALUES ($1, $2, $3, $4, $5, $6)
-      ON CONFLICT (id) DO UPDATE SET
-        name = EXCLUDED.name,
-        account_id = EXCLUDED.account_id,
-        owner_user_id = EXCLUDED.owner_user_id,
-        owner_email = EXCLUDED.owner_email,
-        updated_at = NOW()
       RETURNING id, name, account_id, retention_days, created_at, updated_at
     `,
     [projectId, `${preferredName} Cloud`, 14, accountId, userId, email],
@@ -970,6 +1121,98 @@ export const bootstrapCloudProject = async ({ userId, email, name }: CloudBootst
   return project;
 };
 
+export const createCloudWorkspaceForUser = async ({
+  userId,
+  email,
+  name,
+  currentProjectId,
+}: {
+  userId: string;
+  email: string | null;
+  name: string;
+  currentProjectId?: string | null;
+}) => {
+  await ensureCloudMemberships();
+  await ensureApiKeysTable();
+
+  let accountId: string | null = null;
+
+  if (currentProjectId) {
+    const currentProject = await getProjectAccessContext(userId, currentProjectId);
+    if (currentProject?.permissions.can_manage_billing) {
+      accountId = (currentProject.account_id as string | undefined) ?? null;
+    } else if (currentProject) {
+      throw new Error("forbidden");
+    }
+  }
+
+  if (!accountId) {
+    const accountMembership = await pgPool.query<QueryResultRow>(
+      `
+        SELECT account_id, role
+        FROM account_memberships
+        WHERE user_id = $1
+          AND role = 'owner'
+        ORDER BY
+          account_id ASC
+        LIMIT 1
+      `,
+      [userId],
+    );
+
+    accountId = (accountMembership.rows[0]?.account_id as string | undefined) ?? null;
+  }
+
+  if (!accountId) {
+    throw new Error("missing_account");
+  }
+
+  const trimmedName = name.trim();
+  if (!trimmedName) {
+    throw new Error("invalid_name");
+  }
+
+  const safeBaseId = slugifyProjectId(`${trimmedName}-${randomBytes(4).toString("hex")}`);
+  const projectId = safeBaseId.length > 0 ? safeBaseId : `cloud-${Date.now()}-${randomBytes(4).toString("hex")}`;
+
+  const result = await pgPool.query(
+    `
+      INSERT INTO projects (
+        id,
+        name,
+        retention_days,
+        account_id,
+        owner_user_id,
+        owner_email
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, name, account_id, retention_days, created_at, updated_at
+    `,
+    [projectId, trimmedName, 14, accountId, userId, email],
+  );
+
+  await pgPool.query(
+    `
+      INSERT INTO project_memberships (project_id, user_id, user_email, role)
+      VALUES ($1, $2, $3, 'owner')
+      ON CONFLICT (project_id, user_id) DO UPDATE SET
+        user_email = EXCLUDED.user_email,
+        role = EXCLUDED.role
+    `,
+    [projectId, userId, email],
+  );
+
+  const accessContext = await getProjectAccessContext(userId, projectId);
+  const apiKey =
+    accessContext?.permissions.can_rotate_api_keys
+      ? await ensurePrimaryApiKeyForProject(projectId)
+      : null;
+
+  return toProjectRecord(result.rows[0], apiKey?.token ?? null, accessContext ?? undefined, {
+    retentionDays: 30,
+  });
+};
+
 async function getProjectAccessContext(
   userId: string,
   projectId: string,
@@ -982,6 +1225,7 @@ async function getProjectAccessContext(
         p.id,
         p.name,
         p.account_id,
+        p.owner_email,
         p.retention_days,
         p.cost_threshold_usd,
         p.timeout_threshold_ms,
@@ -1055,7 +1299,11 @@ export const listProjectsForUser = async (userId: string) => {
         ON am.account_id = p.account_id
        AND am.user_id = pm.user_id
       WHERE pm.user_id = $1
-      ORDER BY p.created_at ASC
+      ORDER BY
+        CASE WHEN am.role = 'owner' THEN 0 ELSE 1 END,
+        CASE WHEN pm.role = 'owner' THEN 0 ELSE 1 END,
+        p.created_at ASC,
+        p.id ASC
     `,
     [userId],
   );
@@ -1081,8 +1329,15 @@ export const getDefaultProjectForUser = async (userId: string) => {
       SELECT p.id, p.name, p.account_id, p.retention_days, p.cost_threshold_usd, p.timeout_threshold_ms, p.created_at, p.updated_at
       FROM projects p
       JOIN project_memberships pm ON pm.project_id = p.id
+      LEFT JOIN account_memberships am
+        ON am.account_id = p.account_id
+       AND am.user_id = pm.user_id
       WHERE pm.user_id = $1
-      ORDER BY p.created_at ASC
+      ORDER BY
+        CASE WHEN am.role = 'owner' THEN 0 ELSE 1 END,
+        CASE WHEN pm.role = 'owner' THEN 0 ELSE 1 END,
+        p.created_at ASC,
+        p.id ASC
       LIMIT 1
     `,
     [userId],
@@ -1094,6 +1349,69 @@ export const getDefaultProjectForUser = async (userId: string) => {
 
   const apiKey = await ensurePrimaryApiKeyForProject(result.rows[0].id as string);
   return toProjectRecord(result.rows[0], apiKey.token, undefined, { retentionDays: 30 });
+};
+
+export const isPrimaryWorkspace = async (projectId: string) => {
+  const result = await pgPool.query<{ account_id: string | null }>(
+    `SELECT account_id FROM projects WHERE id = $1 LIMIT 1`,
+    [projectId],
+  );
+  const accountId = result.rows[0]?.account_id ?? null;
+  if (!accountId) {
+    return false;
+  }
+
+  const primaryResult = await pgPool.query<{ id: string }>(
+    `
+      SELECT id
+      FROM projects
+      WHERE account_id = $1
+      ORDER BY created_at ASC, id ASC
+      LIMIT 1
+    `,
+    [accountId],
+  );
+
+  return primaryResult.rows[0]?.id === projectId;
+};
+
+// Returns the effective retention window in days for a project,
+// honouring the plan subscription if the project belongs to an account.
+const getProjectRetentionDays = async (projectId: string): Promise<number> => {
+  const accountId = await getProjectAccountId(projectId);
+  if (!accountId) {
+    // Self-hosted / no account — use the stored value directly.
+    const result = await pgPool.query<{ retention_days: number }>(
+      `SELECT retention_days FROM projects WHERE id = $1 LIMIT 1`,
+      [projectId],
+    );
+    return Number(result.rows[0]?.retention_days ?? 14);
+  }
+
+  const subscription = await getCurrentSubscriptionForAccount(accountId);
+  const planKey =
+    subscription && isActiveSubscriptionStatus(subscription.status)
+      ? subscription.plan_key
+      : "free";
+  return getCloudPlanForKey(planKey).retentionDays;
+};
+
+export const deleteProject = async (projectId: string) => {
+  // Delete ClickHouse spans first — these live outside Postgres and must be
+  // cleaned up explicitly. This is best-effort; Postgres deletion still proceeds
+  // even if the ClickHouse mutation fails.
+  await queryClickHouse(
+    `ALTER TABLE rifft.spans DELETE WHERE project_id = '${escapeValue(projectId)}'`,
+  ).catch(() => undefined);
+
+  // Explicit trace deletion in case the traces table does not yet have
+  // ON DELETE CASCADE wired to projects(id). Fork drafts and trace_baselines
+  // do have cascade from traces, so they are covered.
+  await pgPool.query(`DELETE FROM traces WHERE project_id = $1`, [projectId]);
+
+  // api_keys, project_memberships, and pending_project_invites all have
+  // ON DELETE CASCADE on projects(id) and are removed automatically.
+  await pgPool.query(`DELETE FROM projects WHERE id = $1`, [projectId]);
 };
 
 export const getTraceProjectId = async (traceId: string) => {
@@ -1178,7 +1496,14 @@ export const updateProjectSettings = async (
   }
 
   const apiKey = await ensurePrimaryApiKeyForProject(projectId);
-  return toProjectRecord(result.rows[0], apiKey.token, undefined, { retentionDays: 30 });
+  return {
+    ...toProjectRecord(result.rows[0], apiKey.token, undefined, { retentionDays: 30 }),
+    retention_overridden_by_plan:
+      Boolean(accountId) &&
+      updates.retention_days !== undefined &&
+      enforcedRetentionDays !== null &&
+      updates.retention_days !== enforcedRetentionDays,
+  };
 };
 
 export const regenerateProjectApiKey = async (projectId: string) => {
@@ -1264,116 +1589,45 @@ export const getCloudProjectUsageSummary = async (projectId: string) => {
   };
 };
 
-const asRecord = (value: unknown): Record<string, unknown> | null =>
-  value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-
-const getString = (value: unknown) => (typeof value === "string" && value.length > 0 ? value : null);
-
-const getBoolean = (value: unknown) => (typeof value === "boolean" ? value : false);
-
-const getNested = (value: Record<string, unknown> | null, path: string[]) => {
-  let current: unknown = value;
-  for (const key of path) {
-    const record = asRecord(current);
-    if (!record) {
-      return null;
-    }
-    current = record[key];
-  }
-  return current ?? null;
-};
-
-const resolvePolarAccountId = async (payload: Record<string, unknown>) => {
-  await ensureCloudMemberships();
-
-  const explicitAccountId = getString(getNested(payload, ["metadata", "account_id"])) ??
-    getString(getNested(payload, ["customer", "external_id"])) ??
-    getString(getNested(payload, ["customer", "metadata", "account_id"]));
-
-  if (explicitAccountId) {
-    return explicitAccountId;
-  }
-
-  const customerEmail =
-    getString(getNested(payload, ["customer", "email"])) ??
-    getString(payload.customer_email) ??
-    getString(getNested(payload, ["user", "email"])) ??
-    getString(payload.email);
-
-  if (!customerEmail) {
-    return null;
-  }
-
-  const result = await pgPool.query<{ id: string }>(
-    `
-      SELECT id
-      FROM accounts
-      WHERE owner_email = $1
-      ORDER BY created_at ASC
-      LIMIT 1
-    `,
-    [customerEmail],
-  );
-
-  if (result.rowCount === 0) {
-    return null;
-  }
-
-  return result.rows[0]?.id ?? null;
-};
-
-export const syncPolarSubscription = async (
+export const syncStripeSubscription = async (
   eventType: string,
-  payload: Record<string, unknown>,
+  subscription: {
+    id: string;
+    customer: string;
+    status: string;
+    cancel_at_period_end: boolean;
+    current_period_start?: number | null;
+    current_period_end?: number | null;
+    metadata: Record<string, string>;
+    items: { data: Array<{ price: { metadata: Record<string, string> } }> };
+  },
 ) => {
   await ensureSubscriptionsTable();
 
-  const subscriptionId =
-    getString(payload.id) ??
-    getString(payload.subscription_id) ??
-    getString(getNested(payload, ["subscription", "id"]));
-
-  if (!subscriptionId) {
-    return { synced: false, reason: "missing_subscription_id" as const };
-  }
-
-  const accountId = await resolvePolarAccountId(payload);
+  const accountId = subscription.metadata.account_id ?? null;
   if (!accountId) {
-    return { synced: false, reason: "missing_account_match" as const };
+    return { synced: false, reason: "missing_account_id" as const };
   }
-
-  const status =
-    getString(payload.status) ??
-    getString(getNested(payload, ["subscription", "status"])) ??
-    (eventType.startsWith("subscription.") ? eventType.replace("subscription.", "") : "active");
 
   const planKey =
-    getString(getNested(payload, ["metadata", "plan_key"])) ??
-    getString(getNested(payload, ["product", "metadata", "plan_key"])) ??
-    getPlanKeyForSubscriptionStatus(status);
+    subscription.metadata.plan_key ??
+    subscription.items.data[0]?.price.metadata.plan_key ??
+    "pro";
+  const status = subscription.status;
+  const customerId = typeof subscription.customer === "string"
+    ? subscription.customer
+    : null;
+  const toIsoOrNull = (unixSeconds?: number | null) => {
+    if (typeof unixSeconds !== "number" || !Number.isFinite(unixSeconds) || unixSeconds <= 0) {
+      return null;
+    }
 
-  const customerEmail =
-    getString(getNested(payload, ["customer", "email"])) ??
-    getString(payload.customer_email) ??
-    getString(getNested(payload, ["user", "email"])) ??
-    getString(payload.email);
+    const iso = new Date(unixSeconds * 1000).toISOString();
+    return iso === "Invalid Date" ? null : iso;
+  };
 
-  const customerId =
-    getString(getNested(payload, ["customer", "id"])) ??
-    getString(payload.customer_id);
-
-  const currentPeriodStart =
-    getString(payload.current_period_start) ??
-    getString(payload.started_at) ??
-    null;
-  const currentPeriodEnd =
-    getString(payload.current_period_end) ??
-    getString(payload.ended_at) ??
-    getString(payload.current_period_end_at) ??
-    null;
-  const cancelAtPeriodEnd =
-    getBoolean(payload.cancel_at_period_end) ||
-    getBoolean(payload.cancel_at_period_end_flag);
+  const currentPeriodStart = toIsoOrNull(subscription.current_period_start);
+  const currentPeriodEnd = toIsoOrNull(subscription.current_period_end);
 
   await pgPool.query(
     `
@@ -1383,7 +1637,6 @@ export const syncPolarSubscription = async (
         provider,
         provider_subscription_id,
         provider_customer_id,
-        customer_email,
         plan_key,
         status,
         cancel_at_period_end,
@@ -1391,11 +1644,10 @@ export const syncPolarSubscription = async (
         current_period_end,
         raw_event
       )
-      VALUES ($1, $2, 'polar', $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+      VALUES ($1, $2, 'stripe', $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
       ON CONFLICT (provider_subscription_id) DO UPDATE SET
         account_id = EXCLUDED.account_id,
         provider_customer_id = EXCLUDED.provider_customer_id,
-        customer_email = EXCLUDED.customer_email,
         plan_key = EXCLUDED.plan_key,
         status = EXCLUDED.status,
         cancel_at_period_end = EXCLUDED.cancel_at_period_end,
@@ -1405,38 +1657,42 @@ export const syncPolarSubscription = async (
         updated_at = NOW()
     `,
     [
-      `sub_${subscriptionId}`,
+      `sub_${subscription.id}`,
       accountId,
-      subscriptionId,
+      subscription.id,
       customerId,
-      customerEmail,
       planKey,
       status,
-      cancelAtPeriodEnd,
+      subscription.cancel_at_period_end,
       currentPeriodStart,
       currentPeriodEnd,
-      JSON.stringify({ eventType, payload }),
+      JSON.stringify({ eventType, subscription }),
     ],
   );
 
-  const appliedPlan = getCloudPlanForKey(
-    isActiveSubscriptionStatus(status) ? planKey : "free",
-  );
+  const isActive = ["active", "trialing"].includes(status);
+  const appliedPlan = getCloudPlanForKey(isActive ? planKey : "free");
   await updateAccountProjectRetention(accountId, appliedPlan.retentionDays);
 
   return {
     synced: true,
     account_id: accountId,
-    subscription_id: subscriptionId,
+    subscription_id: subscription.id,
     plan_key: appliedPlan.key,
     status,
   };
 };
 
 export const listTraces = async (filters: TraceListFilters) => {
-  const where: string[] = ["project_id = $1"];
-  const params: unknown[] = [filters.projectId];
-  let paramIndex = 2;
+  // Enforce retention window so free users only see their 14-day window,
+  // pro users their 90-day window, etc.
+  const retentionDays = await getProjectRetentionDays(filters.projectId);
+  const retentionCutoff = new Date();
+  retentionCutoff.setDate(retentionCutoff.getDate() - retentionDays);
+
+  const where: string[] = ["project_id = $1", "started_at >= $2"];
+  const params: unknown[] = [filters.projectId, retentionCutoff.toISOString()];
+  let paramIndex = 3;
 
   if (filters.status && filters.status !== "all") {
     where.push(`status = $${paramIndex}`);
@@ -1471,6 +1727,7 @@ export const listTraces = async (filters: TraceListFilters) => {
   const tracesQuery = `
     SELECT
       trace_id,
+      root_span_name,
       started_at,
       duration_ms,
       status,
@@ -1490,6 +1747,7 @@ export const listTraces = async (filters: TraceListFilters) => {
     total: countResult.rows[0]?.total ?? 0,
     traces: tracesResult.rows.map((row: QueryResultRow) => ({
       trace_id: row.trace_id as string,
+      root_span_name: (row.root_span_name as string | null) ?? null,
       started_at: row.started_at instanceof Date ? row.started_at.toISOString() : row.started_at,
       duration_ms: Number(row.duration_ms ?? 0),
       status: row.status as string,
@@ -1965,176 +2223,22 @@ export const getTrace = async (traceId: string) => {
   };
 };
 
-export const getTraceGraph = async (traceId: string) => {
-  const trace = await getTrace(traceId);
+export const getTraceGraph = async (traceId: string, prefetchedTrace?: HydratedTrace | null) => {
+  const trace = prefetchedTrace ?? (await getTrace(traceId));
 
   if (!trace) {
     return null;
   }
-
-  const spans = trace.spans;
-  const communicationSpans = trace.communication_spans;
-  const agentSpans = spans.filter((span) => Boolean(span.agent_id));
-  const nodeMap = new Map<
-    string,
-    { id: string; framework: string; status: string; cost_usd: number; duration_ms: number; root_cause: boolean }
-  >();
-  const edgeMap = new Map<
-    string,
-    { source: string; target: string; message_count: number; first_message_at: string; status: string; duration_ms: number }
-  >();
-
-  for (const span of agentSpans) {
-    const agentId = span.agent_id;
-    if (!agentId) {
-      continue;
-    }
-
-    const existing = nodeMap.get(agentId);
-    const attributes = span.attributes as Record<string, unknown>;
-    const cost = Number(attributes["cost_usd"] ?? attributes["llm.cost_usd"] ?? 0) || 0;
-
-    if (!existing) {
-      nodeMap.set(agentId, {
-        id: agentId,
-        framework: span.framework,
-        status: span.status,
-        cost_usd: cost,
-        duration_ms: Number(span.duration_ms),
-        root_cause: trace.causal_attribution.root_cause_agent_id === agentId,
-      });
-      continue;
-    }
-
-    existing.duration_ms += Number(span.duration_ms);
-    existing.cost_usd += cost;
-    existing.status =
-      existing.status === "error" || span.status === "error"
-        ? "error"
-        : existing.status === "ok" || span.status === "ok"
-          ? "ok"
-          : "unset";
-  }
-
-  for (const span of communicationSpans) {
-    const key = `${span.source_agent_id}->${span.target_agent_id}`;
-    const existing = edgeMap.get(key);
-
-    if (!existing) {
-      edgeMap.set(key, {
-        source: span.source_agent_id,
-        target: span.target_agent_id,
-        message_count: 1,
-        first_message_at: toIsoTimestamp(span.start_time),
-        status: span.status,
-        duration_ms: Number(span.duration_ms),
-      });
-      continue;
-    }
-
-    existing.message_count += 1;
-    existing.duration_ms += Number(span.duration_ms);
-    existing.status =
-      existing.status === "error" || span.status === "error"
-        ? "error"
-        : existing.status === "ok" || span.status === "ok"
-          ? "ok"
-          : "unset";
-  }
-
-  return {
-    nodes: [...nodeMap.values()],
-    edges: [...edgeMap.values()],
-    causal_attribution: trace.causal_attribution,
-    communication_spans: communicationSpans.map((span) => ({
-      span_id: span.span_id,
-      source_agent_id: span.source_agent_id,
-      target_agent_id: span.target_agent_id,
-      message: span.message,
-      protocol: span.protocol,
-      start_time: span.start_time,
-      end_time: span.end_time,
-      duration_ms: span.duration_ms,
-      status: span.status,
-    })),
-  };
+  return buildTraceGraph(trace);
 };
 
-export const getTraceTimeline = async (traceId: string) => {
-  const trace = await getTrace(traceId);
+export const getTraceTimeline = async (traceId: string, prefetchedTrace?: HydratedTrace | null) => {
+  const trace = prefetchedTrace ?? (await getTrace(traceId));
 
   if (!trace) {
     return null;
   }
-
-  const traceStart = new Date(trace.started_at).getTime();
-  const grouped = new Map<string, { agent_id: string; start_ms: number; end_ms: number; status: string }>();
-
-  for (const span of trace.spans) {
-    if (!span.agent_id) {
-      continue;
-    }
-
-    const startMs = new Date(span.start_time).getTime() - traceStart;
-    const endMs = new Date(span.end_time).getTime() - traceStart;
-    const existing = grouped.get(span.agent_id);
-
-    if (!existing) {
-      grouped.set(span.agent_id, {
-        agent_id: span.agent_id,
-        start_ms: startMs,
-        end_ms: endMs,
-        status: span.status,
-      });
-      continue;
-    }
-
-    existing.start_ms = Math.min(existing.start_ms, startMs);
-    existing.end_ms = Math.max(existing.end_ms, endMs);
-    existing.status =
-      existing.status === "error" || span.status === "error"
-        ? "error"
-        : existing.status === "ok" || span.status === "ok"
-          ? "ok"
-          : "unset";
-  }
-
-  return {
-    agents: [...grouped.values()].map((agent) => ({
-      agent_id: agent.agent_id,
-      start_ms: agent.start_ms,
-      end_ms: agent.end_ms,
-      duration_ms: Math.max(0, agent.end_ms - agent.start_ms),
-      status: agent.status,
-    })),
-    spans: trace.spans.map((span) => ({
-      span_id: span.span_id,
-      agent_id: span.agent_id,
-      name: span.name,
-      start_ms: new Date(span.start_time).getTime() - traceStart,
-      end_ms: new Date(span.end_time).getTime() - traceStart,
-      duration_ms: span.duration_ms,
-      status: span.status,
-      framework: span.framework,
-      span_type:
-        typeof (span.attributes as Record<string, unknown>)["tool.name"] === "string" ||
-        typeof (span.attributes as Record<string, unknown>)["mcp.tool_name"] === "string"
-          ? "tool_call"
-          : "agent_span",
-    })),
-    communication_spans: trace.communication_spans.map((span) => ({
-      span_id: span.span_id,
-      source_agent_id: span.source_agent_id,
-      target_agent_id: span.target_agent_id,
-      message: span.message,
-      protocol: span.protocol,
-      start_ms: new Date(span.start_time).getTime() - traceStart,
-      end_ms: new Date(span.end_time).getTime() - traceStart,
-      duration_ms: span.duration_ms,
-      status: span.status,
-      framework: span.framework,
-    })),
-  };
+  return buildTraceTimeline(trace);
 };
 
 export const getAgentDetail = async (traceId: string, agentId: string) => {
@@ -2419,6 +2523,44 @@ export const addProjectMember = async (
       `,
       [projectId, inviterUserId, inviteeEmail],
     );
+
+    // Send invite email non-blockingly via Resend.
+    const resendApiKey = process.env.RESEND_API_KEY;
+    const resendFromEmail = process.env.RESEND_FROM_EMAIL ?? "noreply@rifft.dev";
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.rifft.dev";
+    const inviteUrl = `${appUrl}/auth?next=${encodeURIComponent("/workspace")}`;
+    if (resendApiKey) {
+      const projectResult = await pgPool.query<{ name: string }>(
+        `SELECT name FROM projects WHERE id = $1 LIMIT 1`,
+        [projectId],
+      );
+      const projectName = projectResult.rows[0]?.name ?? "a Rifft project";
+      fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${resendApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: resendFromEmail,
+          to: inviteeEmail,
+          subject: `You've been invited to ${projectName} on Rifft`,
+          html: `<p>A teammate invited you to join the <strong>${projectName}</strong> workspace on Rifft.</p><p><a href="${inviteUrl}">Sign up or sign in</a> to accept — your access will be granted automatically.</p>`,
+          text: `A teammate invited you to join the ${projectName} workspace on Rifft.\n\nSign up or sign in to accept: ${inviteUrl}`,
+        }),
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            const errorBody = await response.text().catch(() => "");
+            console.error("Resend invite email failed", response.status, errorBody);
+          }
+        })
+        .catch((error) => {
+          // Non-fatal: invite row is already saved; email failure is logged separately.
+          console.error("Resend invite email request failed", error);
+        });
+    }
+
     return { ok: true, reason: "pending" as const };
   }
 
@@ -2444,13 +2586,16 @@ export const consumePendingInvites = async (userId: string, email: string) => {
       SELECT project_id
       FROM pending_project_invites
       WHERE invitee_email = $1
+      ORDER BY created_at ASC
     `,
     [email],
   );
 
   if (pending.rowCount === 0) {
-    return;
+    return null;
   }
+
+  const invitedProjectId = (pending.rows[0]?.project_id as string | undefined) ?? null;
 
   for (const row of pending.rows) {
     const projectId = row.project_id as string;
@@ -2471,6 +2616,8 @@ export const consumePendingInvites = async (userId: string, email: string) => {
     `,
     [email],
   );
+
+  return invitedProjectId;
 };
 
 export const removeProjectMember = async (

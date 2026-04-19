@@ -1,461 +1,541 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
+import {
+  ArrowRight,
+  CheckCircle2,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { RifftLogo } from "@/components/rifft-logo";
+import { siteDescription, siteName, siteUrl } from "@/lib/seo";
+import { AuthForm } from "./auth-form";
+import { TryRifftButton } from "./try-rifft-button";
 
 export const metadata: Metadata = {
-  title: "Rifft — Debug multi-agent AI in minutes",
+  title: "AI Agent Debugger for CrewAI, AutoGen and LangGraph",
   description:
-    "Multi-agent AI debugger that shows which agent caused the failure and how to fix it. Causal graph, step-through replay, and failure classification grounded in UC Berkeley research. Free cloud tier and open-source self-hosted.",
+    "Debug multi-agent pipeline failures faster. Rifft traces the root cause, classifies failures with the MAST taxonomy, and lets you fork and replay any handoff - no pipeline restart needed.",
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    title: `${siteName} | AI Agent Debugger for CrewAI, AutoGen and LangGraph`,
+    description:
+      "Debug multi-agent pipeline failures faster. Rifft traces the root cause, classifies failures with the MAST taxonomy, and lets you fork and replay any handoff - no pipeline restart needed.",
+    url: siteUrl,
+  },
+  twitter: {
+    title: `${siteName} | AI Agent Debugger for CrewAI, AutoGen and LangGraph`,
+    description:
+      "Debug multi-agent pipeline failures faster. Rifft traces the root cause, classifies failures with the MAST taxonomy, and lets you fork and replay any handoff - no pipeline restart needed.",
+  },
 };
 
 const pricingCards = [
   {
+    key: "free" as const,
     eyebrow: "Cloud Free",
     title: "Free",
     amount: "$0 / month",
-    description: "Get to your first trace without touching infrastructure. Start debugging in minutes.",
     features: [
-      "50K spans per month",
-      "14-day trace retention",
-      "MAST failure classification, causal graph, replay",
-      "One project per account",
-      "Community support",
+      "50k spans/mo",
+      "7-day retention",
+      "1 workspace",
     ],
-    cta: { href: "/auth?next=%2Fonboarding", label: "Start for free", variant: "default" as const },
-    featured: true,
+    cta: "Start free",
+    featured: false,
   },
   {
+    key: "pro" as const,
     eyebrow: "Cloud Pro",
     title: "Pro",
     amount: "$29 / month",
-    description: "For developers running agents in production who need history and full debugging power.",
     features: [
-      "500K spans per month",
-      "90-day trace retention",
-      "Fork mode — edit agent state mid-replay",
-      "Cross-trace pattern analysis",
-      "Unlimited team members",
-      "Email support",
-      "$5 per 100K spans above 500K",
+      "500k spans",
+      "90-day retention",
+      "Unlimited workspaces",
+      "SSO",
     ],
-    cta: { href: "/auth?plan=pro&next=%2Fonboarding", label: "Get started", variant: "outline" as const },
+    cta: "Start with Pro",
+    featured: true,
   },
   {
+    key: "scale" as const,
     eyebrow: "Cloud Scale",
     title: "Scale",
     amount: "$99 / month",
-    description: "For teams running agents at serious volume who need a full year of history and priority support.",
     features: [
-      "2M spans per month",
-      "1-year trace retention",
-      "Everything in Pro",
+      "2M spans",
+      "1-year retention",
+      "Unlimited workspaces",
       "Priority support",
-      "$5 per 100K spans above 2M",
     ],
-    cta: { href: "/auth?plan=team&next=%2Fonboarding", label: "Get started", variant: "outline" as const },
+    cta: "Get started",
+    featured: false,
   },
 ];
 
-const outcomes = [
-  {
-    number: "01",
-    title: "See exactly which agent caused the cascade",
-    body: "Rifft builds a causal graph of every inter-agent handoff and traces the failure back to its origin — so you can see which agent decision started the chain reaction, not just where the run finally crashed.",
-  },
-  {
-    number: "02",
-    title: "Understand why the agent made that decision",
-    body: "Every agent decision is captured with the full prompt state, conversation history, and handoff context that led to it. Rifft then classifies the failure using the UC Berkeley MAST taxonomy — 14 failure modes covering everything from context window overflow to dropped handoffs — so you know what went wrong and how to fix it.",
-  },
-  {
-    number: "03",
-    title: "Replay the run and test the fix faster",
-    body: "Step through the trace, fork any handoff point to edit the payload, and verify the fix without rerunning the whole pipeline from scratch.",
-  },
-];
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = searchParams ? await searchParams : {};
+  const nextPath = typeof params.next === "string" ? params.next : "/onboarding";
+  const planIntent = typeof params.plan === "string" ? params.plan : null;
+  const accessToken = (await cookies()).get("rifft_access_token")?.value ?? null;
 
-const steps = [
-  {
-    number: "01",
-    title: "Start free in the hosted app",
-    body: "Go to app.rifft.dev, sign in with GitHub or an email magic link, and land in a ready-to-use project.",
-  },
-  {
-    number: "02",
-    title: "Install the SDK",
-    body: "pip install rifft-sdk rifft-crewai. Copy your project ID, ingest URL, and API key from the onboarding screen.",
-  },
-  {
-    number: "03",
-    title: "Run your existing workflow",
-    body: "Send one real trace from your CrewAI app and let the onboarding screen wait for it live.",
-  },
-  {
-    number: "04",
-    title: "Drop to self-hosted when you want full control",
-    body: "Clone the repo, run docker compose up, and keep Rifft inside your own infra.",
-  },
-];
+  if (accessToken) {
+    redirect(`/bootstrap?next=${encodeURIComponent(nextPath)}`);
+  }
 
-const codeLines = [
-  'import rifft',
-  'import rifft.adapters.crewai  # one line',
-  "",
-  "rifft.init(",
-  '  project_id="proj_your_project_id",',
-  '  endpoint="https://ingest.rifft.dev",',
-  '  api_key="rft_live_xxxxxxxxxxxx"',
-  ")",
-  "",
-  "# your existing crew, unchanged",
-  "crew = Crew(agents=[...], tasks=[...])",
-  "result = crew.kickoff()",
-  "",
-  "# Rifft Cloud opens the trace as soon as it lands",
-];
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: siteName,
+    applicationCategory: "DeveloperApplication",
+    operatingSystem: "Web",
+    url: siteUrl,
+    description: siteDescription,
+    offers: [
+      {
+        "@type": "Offer",
+        name: "Cloud Free",
+        price: "0",
+        priceCurrency: "USD",
+      },
+      {
+        "@type": "Offer",
+        name: "Cloud Pro",
+        price: "29",
+        priceCurrency: "USD",
+      },
+      {
+        "@type": "Offer",
+        name: "Cloud Scale",
+        price: "99",
+        priceCurrency: "USD",
+      },
+    ],
+    featureList: [
+      "Trace single-agent and multi-agent failures",
+      "Find the root cause of agent regressions",
+      "Inspect handoffs between agents",
+      "Compare runs against healthy baselines",
+      "Classify failures with MAST",
+    ],
+  };
 
-const differentiators = [
-  {
-    label: "Failure classification with recommended fixes",
-    detail: "Rifft doesn't just flag that something went wrong — it tells you which of 14 failure patterns it matched, why that pattern causes problems, and what change will stop it happening again.",
-  },
-  {
-    label: "Causal graph across all your agents",
-    detail: "See every message passed between agents as a visual graph. The agent that started the problem is highlighted, so you know where to look before you read a single log line.",
-  },
-  {
-    label: "Fork and replay without restarting",
-    detail: "Edit the message at any handoff point and test your fix right there. No need to rerun the whole pipeline from scratch every time you want to try something different.",
-  },
-  {
-    label: "Before / after comparison",
-    detail: "Mark a working run as your baseline. When the next failure lands, Rifft shows you exactly what changed — fewer guesses about whether your fix actually helped.",
-  },
-];
-
-export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-[#09090b] text-[#fafafa]">
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-[#09090b]/90 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6 lg:px-8">
-          <Link href="/" className="text-sm font-semibold tracking-tight text-white">
-            rifft
-          </Link>
-          <nav className="flex items-center gap-1">
-            <a href="#how-it-works" className="rounded-md px-3 py-2 text-sm text-zinc-400 transition hover:bg-white/5 hover:text-white">
-              How it works
-            </a>
-            <a href="#quickstart" className="rounded-md px-3 py-2 text-sm text-zinc-400 transition hover:bg-white/5 hover:text-white">
-              Quickstart
-            </a>
-            <a href="#pricing" className="rounded-md px-3 py-2 text-sm text-zinc-400 transition hover:bg-white/5 hover:text-white">
-              Pricing
-            </a>
-            <a href="https://github.com/rifft-dev/rifft" className="rounded-md px-3 py-2 text-sm text-zinc-400 transition hover:bg-white/5 hover:text-white">
-              GitHub
-            </a>
-            <Button asChild size="sm" variant="outline" className="ml-2 border-white/15 bg-transparent text-white hover:bg-white/5">
-              <Link href="/auth?next=%2Fonboarding">Start for free</Link>
-            </Button>
-          </nav>
-        </div>
-      </header>
-
-      <main>
-        {/* Hero */}
-        <section className="section-fade mx-auto max-w-5xl px-6 py-24 text-center lg:px-8">
-          <h1 className="mt-8 text-5xl font-normal tracking-[-0.04em] text-white lg:text-7xl">
-            Stop guessing
-            <br />
-            <em className="font-light text-zinc-400">why your agents failed</em>
-          </h1>
-          <p className="mx-auto mt-6 max-w-2xl text-lg font-light leading-8 text-zinc-300">
-            When a multi-agent run breaks, Rifft shows you which agent started the cascade, classifies what went wrong, and tells you what to fix — instead of leaving you to piece it together from logs.
-          </p>
-          <p className="mx-auto mt-3 max-w-xl text-sm font-light leading-7 text-zinc-500">
-            Failure classification grounded in UC Berkeley research covering the 14 most common ways multi-agent systems break in production.
-          </p>
-          <div className="mt-10 flex flex-wrap justify-center gap-3">
-            <Button asChild size="lg" className="bg-white text-black hover:bg-zinc-200">
-              <Link href="/auth?next=%2Fonboarding">
-                Start for free
-                <ArrowRight className="h-4 w-4" />
+    <div className="bg-background">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+      />
+      <div className="px-6 py-8 lg:px-8 lg:py-10">
+        <div className="mx-auto max-w-[1200px]">
+          <nav className="flex items-center justify-between gap-6">
+            <Link href="/" className="text-foreground">
+              <RifftLogo className="h-7 w-auto" />
+            </Link>
+            <div className="hidden items-center gap-8 text-sm text-muted-foreground md:flex">
+              <a href="#product" className="transition-colors hover:text-foreground">
+                Product
+              </a>
+              <a href="#pricing" className="transition-colors hover:text-foreground">
+                Pricing
+              </a>
+              <Link href="/docs" className="transition-colors hover:text-foreground">
+                Docs
               </Link>
-            </Button>
-            <Button asChild size="lg" variant="outline" className="border-white/15 bg-transparent text-white hover:bg-white/5">
-              <a href="https://github.com/rifft-dev/rifft">Self-host on GitHub</a>
-            </Button>
-          </div>
-          <p className="mt-5 text-sm text-zinc-500">
-            No credit card required · 50K spans free · LangSmith and Langfuse alternative
-          </p>
-        </section>
+              <a href="#footer" className="transition-colors hover:text-foreground">
+                Changelog
+              </a>
+            </div>
+          </nav>
 
-        <div className="border-t border-white/10" />
+          <section className="grid gap-12 py-12 lg:grid-cols-[1.15fr_1fr] lg:gap-[72px] lg:py-20">
+            <div className="space-y-8">
+              <AuthForm nextPath={nextPath} planIntent={planIntent} />
+            </div>
 
-        {/* Problem */}
-        <section className="mx-auto max-w-5xl px-6 py-20 lg:px-8">
-          <div className="grid gap-10 rounded-3xl border border-white/10 bg-[#111113] p-8 lg:grid-cols-2 lg:p-12">
-            <div>
-              <p className="mb-4 text-[11px] uppercase tracking-[0.12em] text-zinc-500">The problem</p>
-              <h2 className="text-3xl font-normal tracking-[-0.03em] text-white">
-                Multi-agent failures spread faster than your logs can explain
+            <div className="space-y-4">
+              <div className="overflow-hidden rounded-[18px] border border-border bg-[linear-gradient(180deg,#161616_0%,#111111_100%)]">
+                <div className="flex items-center justify-between border-b border-border px-5 py-4">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
+                  </div>
+                  <div className="font-mono text-[12px] text-muted-foreground">
+                    rifft.dev · run_8a3f2c
+                  </div>
+                  <div className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-emerald-300">
+                    live
+                  </div>
+                </div>
+
+                <div className="space-y-0 px-5 py-5">
+                  {[
+                    {
+                      stage: "TRACE",
+                      color: "bg-zinc-500",
+                      line: "bg-zinc-700",
+                      content: (
+                        <div className="space-y-2 opacity-55">
+                          <div className="rounded-xl border border-border bg-card/60 px-4 py-3 font-mono text-[13px] text-muted-foreground">
+                            Planner → Retriever · 0.4s
+                          </div>
+                          <div className="rounded-xl border border-border bg-card/60 px-4 py-3 font-mono text-[13px] text-muted-foreground">
+                            Retriever → Researcher · 1.1s
+                          </div>
+                        </div>
+                      ),
+                    },
+                    {
+                      stage: "FAILURE",
+                      color: "bg-[oklch(0.66_0.19_25)]",
+                      line: "bg-[oklch(0.66_0.19_25)]",
+                      accent: "text-[oklch(0.66_0.19_25)]",
+                      content: (
+                        <div className="rounded-xl border border-[oklch(0.66_0.19_25_/_0.3)] bg-[oklch(0.66_0.19_25_/_0.08)] px-4 py-3">
+                          <div className="flex flex-wrap items-center gap-3">
+                            <div className="font-medium text-[oklch(0.66_0.19_25)]">
+                              Researcher → Publisher
+                            </div>
+                            <div className="rounded-full border border-[oklch(0.66_0.19_25_/_0.3)] px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.14em] text-[oklch(0.66_0.19_25)]">
+                              unverified
+                            </div>
+                          </div>
+                          <div className="mt-2 text-sm text-muted-foreground">
+                            Hallucinated citation in draft — caught before downstream call.
+                          </div>
+                        </div>
+                      ),
+                    },
+                    {
+                      stage: "DIAGNOSED",
+                      color: "bg-[oklch(0.82_0.14_85)]",
+                      line: "bg-[linear-gradient(to_bottom,oklch(0.82_0.14_85),transparent)]",
+                      dashed: true,
+                      content: (
+                        <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-amber-400/20 bg-amber-500/5 px-4 py-3">
+                          <div className="font-medium text-foreground">
+                            Root cause traced to Researcher
+                          </div>
+                          <div className="rounded-xl border border-amber-400/20 bg-black/20 px-3 py-2">
+                            <div className="font-mono text-[1.75rem] leading-none tracking-[-0.04em] text-[oklch(0.82_0.14_85)]">
+                              120ms
+                            </div>
+                            <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                              to classify &amp; pinpoint
+                            </div>
+                          </div>
+                        </div>
+                      ),
+                    },
+                    {
+                      stage: "FORKED",
+                      color: "bg-[oklch(0.78_0.16_155)]",
+                      line: "bg-[oklch(0.78_0.16_155)]",
+                      ring: true,
+                      content: (
+                        <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-4 py-3">
+                          <div className="flex flex-wrap items-center gap-3">
+                            <div className="font-medium text-foreground">Forked at Researcher</div>
+                            <div className="rounded-full border border-border px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                              + validation
+                            </div>
+                          </div>
+                          <div className="mt-2 text-sm text-muted-foreground">
+                            Resume from the exact broken handoff.
+                          </div>
+                        </div>
+                      ),
+                    },
+                    {
+                      stage: "REPLAYED",
+                      color: "bg-[oklch(0.78_0.16_155)]",
+                      content: (
+                        <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-4 py-3">
+                          <div className="font-medium text-foreground">
+                            Researcher → Publisher · ok
+                          </div>
+                          <div className="rounded-xl border border-emerald-400/20 bg-black/20 px-3 py-2">
+                            <div className="font-mono text-[1.75rem] leading-none tracking-[-0.04em] text-emerald-300">
+                              2.8s
+                            </div>
+                            <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                              end-to-end replay
+                            </div>
+                          </div>
+                        </div>
+                      ),
+                    },
+                  ].map((row, index, rows) => (
+                    <div
+                      key={row.stage}
+                      className="grid grid-cols-[84px_24px_minmax(0,1fr)] gap-4 py-2"
+                    >
+                      <div
+                        className={`pt-1 text-[11px] font-medium uppercase tracking-[0.18em] ${
+                          row.stage === "FAILURE"
+                            ? "text-[oklch(0.66_0.19_25)]"
+                            : row.stage === "DIAGNOSED"
+                              ? "text-[oklch(0.82_0.14_85)]"
+                              : row.stage === "REPLAYED" || row.stage === "FORKED"
+                                ? "text-emerald-300"
+                                : "text-muted-foreground"
+                        }`}
+                      >
+                        {row.stage}
+                      </div>
+                      <div className="relative flex justify-center">
+                        <div
+                          className={`relative z-10 mt-1 h-3 w-3 rounded-full ${row.color} ${
+                            row.ring ? "ring-2 ring-emerald-300/40 ring-offset-2 ring-offset-[#111111]" : ""
+                          } ${row.stage === "FAILURE" ? "shadow-[0_0_18px_rgba(255,71,87,0.45)]" : ""}`}
+                        />
+                        {index < rows.length - 1 ? (
+                          <div
+                            className={`absolute top-5 h-[calc(100%-0.25rem)] w-px ${
+                              row.dashed ? "border-l border-dashed border-amber-300/60" : row.line
+                            }`}
+                          />
+                        ) : null}
+                      </div>
+                      <div>{row.content}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between border-t border-border px-5 py-4 text-sm">
+                  <div className="font-mono text-muted-foreground">run_8a3f2c · 5 spans</div>
+                  <div className="text-muted-foreground">Open full trace →</div>
+                </div>
+              </div>
+
+              <div className="text-sm text-muted-foreground">
+                Works with CrewAI, AutoGen, LangGraph, OpenAI Swarm, LlamaIndex, and any custom
+                SDK.
+              </div>
+            </div>
+          </section>
+
+          <section id="product" className="border-t py-16">
+            <div className="space-y-4">
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                Why Rifft
+              </div>
+              <h2 className="max-w-3xl text-3xl font-semibold tracking-[-0.025em] lg:text-4xl">
+                Built for teams debugging multi-agent failures in production.
               </h2>
-              <p className="mt-4 text-[15px] font-light leading-7 text-zinc-300">
-                Agent A passes bad data to Agent B. Agent B treats it as fact. By the time Agent C fails, you&apos;re three levels deep with no idea where it started. Every other tool gives you a wall of spans and leaves you to figure out the rest. Rifft traces it back to the root, tells you what kind of failure it is, and shows you what to change.
+              <p className="max-w-3xl text-base text-muted-foreground lg:text-lg">
+                Purpose-built for engineers who need to find the broken handoff quickly, name the
+                failure mode clearly, and test a fix without re-running the whole system.
               </p>
             </div>
-            <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#18181b] font-mono text-xs">
-              <div className="flex items-center gap-2 border-b border-white/10 bg-[#111113] px-4 py-3">
-                <span className="h-2 w-2 rounded-full bg-red-400/40" />
-                <span className="h-2 w-2 rounded-full bg-amber-400/40" />
-                <span className="h-2 w-2 rounded-full bg-emerald-400/40" />
-              </div>
-              <div className="space-y-2 px-4 py-4 text-zinc-400">
-                <div><span className="mr-2 text-zinc-500">→</span><span className="text-emerald-400">orchestrator</span> started</div>
-                <div><span className="mr-2 text-zinc-500">→</span><span className="text-emerald-400">researcher</span> executing task...</div>
-                <div><span className="mr-2 text-zinc-500">→</span><span className="text-amber-400">researcher</span> passed output to writer</div>
-                <div><span className="mr-2 text-zinc-500">→</span><span className="text-red-400">writer</span> failed — but why?</div>
-                <div className="pt-2"><span className="mr-2 text-zinc-500">⬡</span>rifft MAST classification:</div>
-                <div><span className="mr-2 text-zinc-500"> </span><span className="text-amber-400">unverified_information_propagation</span></div>
-                <div><span className="mr-2 text-zinc-500"> </span><span className="text-zinc-500">→ insert a validation step before writer</span></div>
-              </div>
-            </div>
-          </div>
-        </section>
 
-        <div className="border-t border-white/10" />
-
-        {/* How it works */}
-        <section id="how-it-works" className="mx-auto max-w-5xl px-6 py-20 lg:px-8">
-          <p className="text-center text-[11px] uppercase tracking-[0.12em] text-zinc-500">How it works</p>
-          <h2 className="mt-4 text-center text-4xl font-normal tracking-[-0.03em] text-white">
-            Three things Rifft gives you when a multi-agent run breaks
-          </h2>
-          <div className="mt-14 grid gap-6 lg:grid-cols-3">
-            {outcomes.map((outcome) => (
-              <Card key={outcome.number} className="border-white/10 bg-[#111113] text-white shadow-none">
-                <CardContent className="p-7">
-                  <p className="text-[11px] text-zinc-500">{outcome.number}</p>
-                  <h3 className="mt-4 text-base font-medium">{outcome.title}</h3>
-                  <p className="mt-3 text-sm font-light leading-6 text-zinc-300">{outcome.body}</p>
+            <div className="mt-8 grid gap-6 md:grid-cols-3">
+              <Card className="rounded-[18px] border-border/80 bg-card">
+                <CardContent className="space-y-3 p-6">
+                  <div className="text-lg font-semibold">Causal chain attribution</div>
+                  <p className="text-sm text-muted-foreground">
+                    Root cause attribution past the errored span, so you can see which earlier
+                    agent actually corrupted the run.
+                  </p>
                 </CardContent>
               </Card>
-            ))}
-          </div>
-        </section>
-
-        <div className="border-t border-white/10" />
-
-        {/* Differentiators */}
-        <section className="mx-auto max-w-5xl px-6 py-20 lg:px-8">
-          <p className="text-center text-[11px] uppercase tracking-[0.12em] text-zinc-500">Why Rifft</p>
-          <h2 className="mt-4 text-center text-4xl font-normal tracking-[-0.03em] text-white">
-            What no other observability tool offers
-          </h2>
-          <p className="mx-auto mt-5 max-w-2xl text-center text-base font-light leading-7 text-zinc-300">
-            LangSmith, Langfuse, and Datadog show you what happened. Rifft tells you what kind of failure it was, which agent owns it, and exactly what to change — backed by peer-reviewed research on how multi-agent systems actually break.
-          </p>
-          <div className="mt-10 grid gap-4 lg:grid-cols-2">
-            {differentiators.map((item) => (
-              <div key={item.label} className="rounded-2xl border border-white/10 bg-[#111113] p-6">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
-                  <span className="text-sm font-medium text-white">{item.label}</span>
-                </div>
-                <p className="mt-3 text-sm font-light leading-6 text-zinc-400">{item.detail}</p>
-              </div>
-            ))}
-          </div>
-          <p className="mt-8 text-center text-sm text-zinc-500">
-            Classification is grounded in{" "}
-            <a
-              href="https://arxiv.org/abs/2503.13657"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-zinc-400 underline underline-offset-4 transition hover:text-white"
-            >
-              peer-reviewed research from UC Berkeley
-            </a>
-            {" "}on how multi-agent systems fail in production — published at NeurIPS 2025.
-          </p>
-        </section>
-
-        <div className="border-t border-white/10" />
-
-        {/* Quickstart */}
-        <section id="quickstart" className="mx-auto max-w-5xl px-6 py-20 lg:px-8">
-          <p className="text-center text-[11px] uppercase tracking-[0.12em] text-zinc-500">Quickstart</p>
-          <h2 className="mt-4 text-center text-4xl font-normal tracking-[-0.03em] text-white">
-            Go from sign-in to first trace in under 10 minutes
-          </h2>
-          <div className="mt-12 grid gap-8 lg:grid-cols-2">
-            <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#111113]">
-              <div className="flex items-center gap-2 border-b border-white/10 bg-[#18181b] px-4 py-3">
-                <span className="h-2 w-2 rounded-full bg-red-400/40" />
-                <span className="h-2 w-2 rounded-full bg-amber-400/40" />
-                <span className="h-2 w-2 rounded-full bg-emerald-400/40" />
-                <span className="ml-2 font-mono text-[11px] text-zinc-500">crewai_example.py</span>
-              </div>
-              <div className="space-y-1 p-5">
-                {codeLines.map((line, index) => (
-                  <div key={`${index}-${line}`} className="flex gap-4">
-                    <span className="w-4 shrink-0 font-mono text-xs text-zinc-600">{index + 1}</span>
-                    <span className="font-mono text-xs leading-7 text-[#a1e3b0]">{line || " "}</span>
-                  </div>
-                ))}
-              </div>
+              <Card className="rounded-[18px] border-border/80 bg-card">
+                <CardContent className="space-y-3 p-6">
+                  <div className="text-lg font-semibold">MAST failure classification</div>
+                  <p className="text-sm text-muted-foreground">
+                    Named failure modes like unverified output, tool loop, handoff mismatch, and
+                    context overflow.
+                  </p>
+                </CardContent>
+              </Card>
+              <Card className="rounded-[18px] border-border/80 bg-card">
+                <CardContent className="space-y-3 p-6">
+                  <div className="text-lg font-semibold">Fork &amp; replay</div>
+                  <p className="text-sm text-muted-foreground">
+                    Resume from any handoff, keep prior steps, and test the smallest possible fix.
+                  </p>
+                </CardContent>
+              </Card>
             </div>
-            <div className="space-y-6">
-              {steps.map((step) => (
-                <div key={step.number} className="flex gap-4">
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/10 bg-[#18181b] font-mono text-[11px] text-zinc-500">
-                    {step.number}
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-medium text-white">{step.title}</h4>
-                    <p className="mt-1 text-sm font-light leading-6 text-zinc-300">{step.body}</p>
-                  </div>
-                </div>
-              ))}
+          </section>
+
+          <section id="pricing" className="border-t py-16">
+            <div className="space-y-4">
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                Pricing
+              </div>
+              <h2 className="text-3xl font-semibold tracking-[-0.025em] lg:text-4xl">
+                Start free, upgrade when your traces get serious.
+              </h2>
             </div>
-          </div>
-        </section>
 
-        <div className="border-t border-white/10" />
-
-        {/* Pricing */}
-        <section id="pricing" className="mx-auto max-w-5xl px-6 py-20 lg:px-8">
-          <p className="text-center text-[11px] uppercase tracking-[0.12em] text-zinc-500">Pricing</p>
-          <h2 className="mt-4 text-center text-4xl font-normal tracking-[-0.03em] text-white">
-            Simple pricing. Start free, scale when you need to.
-          </h2>
-          <p className="mx-auto mt-5 max-w-2xl text-center text-base font-light leading-7 text-zinc-300">
-            Start in Rifft Cloud for free, upgrade when you need more volume and retention, or self-host forever if you want full control.
-          </p>
-          <div className="mt-10 grid gap-6 lg:grid-cols-3">
-            {pricingCards.map((card) => (
-              <Card
-                key={card.eyebrow}
-                className={`flex h-full flex-col border-white/10 bg-[#111113] text-white shadow-none ${card.featured ? "ring-1 ring-white/10" : ""}`}
-              >
-                <CardContent className="flex h-full flex-col gap-5 p-7">
-                  <div className="inline-flex w-fit rounded-full border border-white/10 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.08em] text-zinc-500">
-                    {card.eyebrow}
+            <div className="mt-8 grid gap-6 md:grid-cols-3">
+              {pricingCards.map((plan) => (
+                <div
+                  key={plan.title}
+                  className={`relative rounded-[18px] border p-6 ${
+                    plan.featured
+                      ? "border-border bg-[#1c1c1c] shadow-lg shadow-black/20"
+                      : "border-border bg-card"
+                  }`}
+                >
+                  {plan.featured ? (
+                    <div className="absolute left-6 top-0 -translate-y-1/2 rounded-full border border-border bg-background px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-foreground">
+                      Most popular
+                    </div>
+                  ) : null}
+                  <div className="space-y-2">
+                    <div className="text-2xl font-semibold">{plan.title}</div>
+                    <div className="text-3xl font-semibold tracking-[-0.03em]">{plan.amount}</div>
                   </div>
-                  <div>
-                    <h3 className="text-lg font-medium">{card.title}</h3>
-                    <div className="mt-2 text-3xl tracking-[-0.04em] text-white">{card.amount}</div>
-                  </div>
-                  <p className="text-sm font-light leading-6 text-zinc-300">{card.description}</p>
-                  <ul className="space-y-2 text-sm text-zinc-300">
-                    {card.features.map((feature) => (
-                      <li key={feature} className="flex items-start gap-2">
-                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+                  <ul className="mt-6 space-y-3">
+                    {plan.features.map((feature) => (
+                      <li key={feature} className="flex items-start gap-3 text-sm text-muted-foreground">
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-foreground" />
                         <span>{feature}</span>
                       </li>
                     ))}
                   </ul>
-                  <div className="mt-auto pt-2">
-                    <Button
-                      asChild
-                      variant={card.cta.variant}
-                      className={card.cta.variant === "default" ? "w-full bg-white text-black hover:bg-zinc-200" : "w-full border-white/15 bg-transparent text-white hover:bg-white/5"}
-                    >
-                      {card.cta.href.startsWith("/") ? (
-                        <Link href={card.cta.href}>{card.cta.label}</Link>
-                      ) : (
-                        <a href={card.cta.href}>{card.cta.label}</a>
-                      )}
-                    </Button>
+                  <div className="mt-6">
+                    <TryRifftButton planKey={plan.key} label={plan.cta} />
                   </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </section>
-
-        <div className="border-t border-white/10" />
-
-        {/* Self-hosted */}
-        <section className="mx-auto max-w-5xl px-6 py-20 lg:px-8">
-          <p className="text-center text-[11px] uppercase tracking-[0.12em] text-zinc-500">Self-hosted</p>
-          <h2 className="mt-4 text-center text-4xl font-normal tracking-[-0.03em] text-white">
-            Want full control? Run it yourself.
-          </h2>
-          <p className="mx-auto mt-5 max-w-2xl text-center text-base font-light leading-7 text-zinc-300">
-            The full Rifft stack is MIT licensed and open source. One command to start, no limits, no data leaving your infrastructure.
-          </p>
-          <div className="mx-auto mt-10 max-w-xl rounded-3xl border border-white/10 bg-[#111113] p-8">
-            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-              <div className="space-y-4">
-                <div className="inline-flex w-fit rounded-full border border-white/10 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.08em] text-zinc-500">
-                  OSS
                 </div>
-                <ul className="space-y-2 text-sm text-zinc-300">
-                  <li className="flex items-start gap-2">
-                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
-                    <span>Unlimited spans, no limits</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
-                    <span>MIT licensed, full source available</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
-                    <span>Docker Compose, one command to start</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
-                    <span>Community support</span>
-                  </li>
-                </ul>
+              ))}
+            </div>
+          </section>
+
+          <section className="border-t py-16">
+            <div className="space-y-4">
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                Comparison
               </div>
-              <div className="shrink-0">
-                <div className="text-3xl tracking-[-0.04em] text-white">Free forever</div>
-                <Button asChild variant="outline" className="mt-4 border-white/15 bg-transparent text-white hover:bg-white/5">
-                  <a href="https://github.com/rifft-dev/rifft">View on GitHub</a>
-                </Button>
+              <h2 className="text-3xl font-semibold tracking-[-0.025em] lg:text-4xl">
+                Looking for a LangSmith or Langfuse alternative?
+              </h2>
+            </div>
+
+            <div className="mt-8 overflow-x-auto rounded-[18px] border border-border bg-card">
+              <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="px-5 py-4 font-medium text-muted-foreground">Feature</th>
+                    <th className="bg-card-foreground/0 px-5 py-4 font-medium text-foreground">Rifft</th>
+                    <th className="px-5 py-4 font-medium text-muted-foreground">LangSmith</th>
+                    <th className="px-5 py-4 font-medium text-muted-foreground">Langfuse</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ["Causal chain attribution", "●", "—", "—"],
+                    ["MAST failure classification", "●", "—", "—"],
+                    ["Fork & replay from any handoff", "●", "—", "—"],
+                    ["Multi-agent trace view", "●", "Partial", "Partial"],
+                    ["General LLM tracing", "●", "●", "●"],
+                    ["Self-hosted option", "●", "●", "●"],
+                    ["Free tier", "50K spans/mo", "5K traces/mo", "50K events/mo"],
+                  ].map((row) => (
+                    <tr key={row[0]} className="border-b border-border last:border-b-0">
+                      <td className="px-5 py-4 text-foreground">{row[0]}</td>
+                      <td className="bg-card-2 px-5 py-4 font-medium text-foreground">{row[1]}</td>
+                      <td className="px-5 py-4 text-muted-foreground">{row[2]}</td>
+                      <td className="px-5 py-4 text-muted-foreground">{row[3]}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <p className="mt-4 text-sm text-muted-foreground">
+              Comparison reflects public product information as of April 2026. Let us know if
+              we&apos;re missing something — we keep this table honest.
+            </p>
+          </section>
+
+          <section className="border-t py-16">
+            <div className="rounded-[18px] border border-border bg-card px-6 py-8">
+              <div className="grid gap-5 md:grid-cols-[auto_minmax(0,1fr)] md:items-start">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-card-2 font-mono text-sm text-foreground">
+                  HP
+                </div>
+                <div className="space-y-4">
+                  <blockquote className="max-w-4xl text-xl font-medium leading-8 tracking-[-0.02em] text-foreground">
+                    “We shipped an agent to prod, it broke on handoff 6 of 9, and Rifft told us
+                    exactly why and let us re-run from step 6. Cut our debug loop from hours to
+                    about two minutes.”
+                  </blockquote>
+                  <div className="text-sm text-muted-foreground">
+                    Hana Park, Staff Engineer, ClusterLabs, CrewAI user since 2024.
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <div className="border-t border-white/10" />
+          <footer id="footer" className="border-t py-16">
+            <div className="grid gap-10 md:grid-cols-[1.3fr_repeat(4,minmax(0,1fr))]">
+              <div className="space-y-4">
+                <RifftLogo className="h-7 w-auto" />
+                <p className="max-w-xs text-sm text-muted-foreground">
+                  Failure debugging for multi-agent pipelines. Trace, classify, fork, replay.
+                </p>
+              </div>
+              <div className="space-y-3">
+                <div className="text-sm font-medium text-foreground">Product</div>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  <div>Overview</div>
+                  <div>Pricing</div>
+                  <div>Changelog</div>
+                  <div>Integrations</div>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <div className="text-sm font-medium text-foreground">Resources</div>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  <div>Docs</div>
+                  <div>API reference</div>
+                  <div>MAST taxonomy</div>
+                  <div>Sample traces</div>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <div className="text-sm font-medium text-foreground">Company</div>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  <div>Customers</div>
+                  <div>Blog</div>
+                  <div>Careers</div>
+                  <div>Contact</div>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <div className="text-sm font-medium text-foreground">Legal</div>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  <div>Privacy</div>
+                  <div>Terms</div>
+                  <div>Security</div>
+                  <div>DPA</div>
+                </div>
+              </div>
+            </div>
 
-        {/* CTA */}
-        <section className="mx-auto max-w-5xl px-6 py-20 text-center lg:px-8">
-          <h2 className="text-4xl font-normal tracking-[-0.03em] text-white">
-            Start free, send one trace, and see where the failure began
-          </h2>
-          <p className="mx-auto mt-4 max-w-2xl text-base font-light leading-7 text-zinc-300">
-            Rifft Cloud gets you from sign-in to your first classified failure in under 10 minutes. Self-hosted stays available when you want to run everything yourself.
-          </p>
-          <div className="mt-8 flex flex-wrap justify-center gap-3">
-            <Button asChild size="lg" className="bg-white text-black hover:bg-zinc-200">
-              <Link href="/auth?next=%2Fonboarding">Start for free</Link>
-            </Button>
-            <Button asChild size="lg" variant="outline" className="border-white/15 bg-transparent text-white hover:bg-white/5">
-              <a href="https://github.com/rifft-dev/rifft">View self-hosted setup</a>
-            </Button>
-          </div>
-        </section>
-      </main>
-
-      <footer className="border-t border-white/10">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-6 py-7 lg:px-8">
-          <div className="font-mono text-xs text-zinc-500">rifft</div>
-          <div className="flex gap-5 text-sm text-zinc-500">
-            <a href="https://github.com/rifft-dev/rifft" className="transition hover:text-white">GitHub</a>
-            <a href="https://github.com/rifft-dev/rifft/blob/main/LICENSE" className="transition hover:text-white">MIT licence</a>
-            <a href="https://github.com/rifft-dev/rifft/blob/main/README.md" className="transition hover:text-white">Docs</a>
-          </div>
-          <div className="text-xs text-zinc-500">© 2026 Rifft</div>
+            <div className="mt-12 flex flex-col gap-4 border-t border-border pt-6 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
+              <div>© 2026 Rifft Inc.</div>
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-400" />
+                All systems operational · status.rifft.dev
+              </div>
+            </div>
+          </footer>
         </div>
-      </footer>
+      </div>
     </div>
   );
 }

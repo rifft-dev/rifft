@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyTrace } from "../src/classify.js";
+import { classifyTrace } from "../src/classify.ts";
 
 type SpanRecord = Parameters<typeof classifyTrace>[0][number];
 

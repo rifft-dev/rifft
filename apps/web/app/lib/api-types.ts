@@ -1,5 +1,6 @@
 export type TraceSummary = {
   trace_id: string;
+  root_span_name: string | null;
   started_at: string;
   duration_ms: number;
   status: "ok" | "error" | "unset";
@@ -17,7 +18,9 @@ export type TraceSummary = {
 export type ProjectSettings = {
   id: string;
   name: string;
+  is_primary_workspace?: boolean;
   account_id: string | null;
+  owner_email: string | null;
   api_key: string | null;
   project_role: "owner" | "member" | null;
   account_role: "owner" | "member" | null;
@@ -29,18 +32,30 @@ export type ProjectSettings = {
   retention_days: number;
   cost_threshold_usd: number;
   timeout_threshold_ms: number;
+  retention_overridden_by_plan?: boolean;
   created_at: string;
   updated_at: string;
 };
 
+export type CloudProjectSummary = {
+  id: string;
+  name: string;
+  project_role: "owner" | "member" | null;
+  account_role: "owner" | "member" | null;
+  created_at: string;
+  retention_days: number;
+  cost_threshold_usd: number;
+  timeout_threshold_ms: number;
+};
+
 export type ProjectUsageSummary = {
   plan: {
-    key: "free" | "pro";
+    key: "free" | "pro" | "scale";
     name: string;
     retention_days: number;
     monthly_span_limit: number;
     overage_price_per_100k_usd: number | null;
-    support: "community" | "email";
+    support: "community" | "email" | "priority";
     subscription_status: string;
     current_period_end: string | null;
     cancel_at_period_end: boolean;

@@ -7,12 +7,15 @@ const apiBaseUrl =
 type ProjectResponse = {
   id: string;
   name: string;
+  permissions?: {
+    can_manage_billing?: boolean;
+  };
 };
 
 type UsageResponse = {
   plan: {
     name: string;
-    key: "free" | "pro";
+    key: "free" | "pro" | "scale";
     retention_days: number;
   };
   usage: {
@@ -53,30 +56,52 @@ export async function GET() {
     authorization: `Bearer ${accessToken}`,
   };
 
-  const [projectResponse, usageResponse, tracesResponse] = await Promise.all([
-    fetch(`${apiBaseUrl}/projects/${resolution.projectId}`, {
-      cache: "no-store",
-      headers,
-    }),
-    fetch(`${apiBaseUrl}/projects/${resolution.projectId}/usage`, {
-      cache: "no-store",
-      headers,
-    }),
-    fetch(`${apiBaseUrl}/projects/${resolution.projectId}/traces?page=1&page_size=5`, {
-      cache: "no-store",
-      headers,
-    }),
-  ]);
+  let projectResponse: Response;
+  let usageResponse: Response;
+  try {
+    [projectResponse, usageResponse] = await Promise.all([
+      fetch(`${apiBaseUrl}/projects/${resolution.projectId}`, {
+        cache: "no-store",
+        headers,
+      }),
+      fetch(`${apiBaseUrl}/projects/${resolution.projectId}/usage`, {
+        cache: "no-store",
+        headers,
+      }),
+    ]);
+  } catch {
+    return NextResponse.json({ error: "cloud_api_unreachable" }, { status: 503 });
+  }
 
-  if (!projectResponse.ok || !usageResponse.ok || !tracesResponse.ok) {
+  if (!projectResponse.ok || !usageResponse.ok) {
     return NextResponse.json({ error: "cloud_context_unavailable" }, { status: 500 });
   }
 
-  const [project, usage, traces] = (await Promise.all([
+  const [project, usage] = (await Promise.all([
     projectResponse.json(),
     usageResponse.json(),
-    tracesResponse.json(),
-  ])) as [ProjectResponse, UsageResponse, TraceListResponse];
+  ])) as [ProjectResponse, UsageResponse];
+
+  let traces: TraceListResponse = {
+    traces: [],
+    total: 0,
+  };
+
+  try {
+    const tracesResponse = await fetch(
+      `${apiBaseUrl}/projects/${resolution.projectId}/traces?page=1&page_size=5`,
+      {
+        cache: "no-store",
+        headers,
+      },
+    );
+
+    if (tracesResponse.ok) {
+      traces = (await tracesResponse.json()) as TraceListResponse;
+    }
+  } catch {
+    // Sidebar should still render even if trace summary data is unavailable.
+  }
 
   const latest = traces.traces[0] ?? null;
   const latestIncident =
@@ -92,4 +117,3 @@ export async function GET() {
     },
   });
 }
-

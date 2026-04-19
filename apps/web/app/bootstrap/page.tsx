@@ -25,6 +25,8 @@ export default function BootstrapPage() {
   const [hasFailed, setHasFailed] = useState(false);
   const [retryNonce, setRetryNonce] = useState(0);
   const nextPath = searchParams.get("next") ?? "/onboarding";
+  const reason = searchParams.get("reason") ?? "workspace";
+  const isSessionIssue = reason === "session";
 
   useEffect(() => {
     if (!user || !accessToken) {
@@ -94,9 +96,20 @@ export default function BootstrapPage() {
             {status}
           </div>
           <p className="text-sm text-muted-foreground">
-            This creates or finds your first hosted project and makes it the active workspace for
-            the app.
+            {isSessionIssue
+              ? "Rifft couldn't restore your active workspace from the current session, so it's checking your cloud workspaces again."
+              : "This creates or finds your first hosted project and makes it the active workspace for the app."}
           </p>
+          {isSessionIssue ? (
+            <div className="rounded-2xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+              <div className="font-medium text-foreground">Session or workspace context needs refreshing.</div>
+              <p className="mt-2">
+                This usually means your active workspace cookie is stale, your session expired, or
+                your workspace access changed. Retrying should repair the active workspace
+                automatically.
+              </p>
+            </div>
+          ) : null}
           {hasFailed ? (
             <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-muted-foreground">
               <div className="font-medium text-foreground">Try again first.</div>

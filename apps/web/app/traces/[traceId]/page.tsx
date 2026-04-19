@@ -1,29 +1,21 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AlertTriangle, ArrowLeft, GitBranch, TimerReset, TrendingDown, TrendingUp } from "lucide-react";
+import { AlertTriangle, ArrowLeft, GitBranch, TrendingDown, TrendingUp } from "lucide-react";
 import {
   getAgentDetail,
+  getProjectSettings,
   getForkDrafts,
   getProjectBaseline,
   getTraceComparison,
-  getTraceDetail,
-  getTraceGraph,
-  getTraceTimeline,
+  getTraceSnapshot,
 } from "../../lib/api";
 import { buildIncidentReport } from "../../lib/incident-report";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { formatCurrency } from "@/lib/utils";
 import { InteractiveTraceDetail } from "./interactive-trace-detail";
 import { ShareIncidentReport } from "./share-incident-report";
 import { SetBaselineButton } from "./set-baseline-button";
-
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 4,
-  }).format(value);
 
 const formatSignedNumber = (value: number, unit = "") => {
   const prefix = value > 0 ? "+" : "";
@@ -38,14 +30,14 @@ export default async function TraceDetailPage({
   const { traceId } = await params;
 
   try {
-    const [trace, comparisonResponse, graph, timeline, forkDrafts, baselineResponse] = await Promise.all([
-      getTraceDetail(traceId),
-      getTraceComparison(traceId),
-      getTraceGraph(traceId),
-      getTraceTimeline(traceId),
-      getForkDrafts(traceId),
-      getProjectBaseline(),
-    ]);
+   const [snapshot, comparisonResponse, forkDrafts, baselineResponse, projectSettings] = await Promise.all([
+  getTraceSnapshot(traceId),
+  getTraceComparison(traceId),
+  getForkDrafts(traceId),
+  getProjectBaseline(),
+  getProjectSettings(),
+]);
+    const { trace, graph, timeline } = snapshot;
     const agentDetails = await Promise.all(
       graph.nodes.map(async (node) => ({
         agentId: node.id,
@@ -56,10 +48,11 @@ export default async function TraceDetailPage({
     const failingAgent = trace.causal_attribution.failing_agent_id ?? "Not inferred";
     const primaryFailure = trace.mast_failures[0]?.mode ?? "No failure detected";
     const comparison = comparisonResponse.comparison;
-    const baseline = baselineResponse.baseline;
-    const isCurrentBaseline = baseline?.trace_id === trace.trace_id;
-    const comparisonData = comparison ?? null;
-    const incidentReport = buildIncidentReport(trace, comparisonData);
+  const baseline = baselineResponse.baseline;
+  const isCurrentBaseline = baseline?.trace_id === trace.trace_id;
+  const comparisonData = comparison ?? null;
+  const incidentReport = buildIncidentReport(trace, comparisonData);
+  const hasIncidentContext = trace.mast_failures.length > 0 || trace.status === "error";
 
     return (
       <div className="space-y-6 px-0 py-0">
@@ -74,9 +67,12 @@ export default async function TraceDetailPage({
             <div className="space-y-4">
               <Badge variant="outline">Trace detail</Badge>
               <div className="space-y-3">
-                <h1 className="font-mono text-3xl font-semibold tracking-tight lg:text-4xl">
-                  {trace.trace_id}
-                </h1>
+               <h1 className="text-3xl font-semibold tracking-tight lg:text-4xl">
+  {trace.root_span_name ?? trace.trace_id}
+</h1>
+{trace.root_span_name ? (
+  <p className="font-mono text-xs text-muted-foreground">{trace.trace_id}</p>
+) : null}
                 <p className="max-w-3xl text-muted-foreground">
                   Follow the failure from the first bad handoff through the downstream agent that
                   finally broke. This view keeps the causal story, message payload, and replay path
@@ -88,48 +84,40 @@ export default async function TraceDetailPage({
                   {trace.status}
                 </Badge>
                 <Badge variant="outline">{trace.agent_count} agents</Badge>
-                <Badge variant="outline">{trace.span_count} spans</Badge>
-                <Badge variant="outline">{formatCurrency(trace.total_cost_usd)}</Badge>
+<Badge variant="outline">{formatCurrency(trace.total_cost_usd)}</Badge>
                 {isCurrentBaseline ? <Badge variant="secondary">Baseline trace</Badge> : null}
               </div>
               <div className="flex flex-wrap gap-3">
-                <SetBaselineButton traceId={trace.trace_id} isCurrentBaseline={isCurrentBaseline} />
-                <ShareIncidentReport traceId={trace.trace_id} report={incidentReport} />
+                <SetBaselineButton
+  traceId={trace.trace_id}
+  isCurrentBaseline={isCurrentBaseline}
+  canUpdate={projectSettings.permissions.can_update_settings}
+/>                <ShareIncidentReport traceId={trace.trace_id} report={incidentReport} />
               </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-              <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-4">
-                <div className="flex items-center gap-2 text-sm font-medium text-destructive">
-                  <AlertTriangle className="h-4 w-4" />
-                  Root cause
-                </div>
-                <div className="mt-2 font-mono text-sm">{rootCauseAgent}</div>
-                <div className="mt-1 text-xs text-muted-foreground">{primaryFailure}</div>
-              </div>
-              <div className="rounded-2xl border bg-muted/40 p-4">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <GitBranch className="h-4 w-4" />
-                  Failing agent
-                </div>
-                <div className="mt-2 font-mono text-sm">{failingAgent}</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Last known failing point in the inferred chain
-                </div>
-              </div>
-              <div className="rounded-2xl border bg-muted/40 p-4">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <TimerReset className="h-4 w-4" />
-                  Replay status
-                </div>
-                <div className="mt-2 text-sm">
-                  {trace.communication_spans.length > 0
-                    ? `${trace.communication_spans.length} communication steps available`
-                    : "No communication events captured"}
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Use replay to step through the cascade and test a fix path
-                </div>
-              </div>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+              {hasIncidentContext ? (
+                <>
+                  <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-destructive">
+                      <AlertTriangle className="h-4 w-4" />
+                      Root cause
+                    </div>
+                    <div className="mt-2 font-mono text-sm">{rootCauseAgent}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">{primaryFailure}</div>
+                  </div>
+                  <div className="rounded-2xl border bg-muted/40 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <GitBranch className="h-4 w-4" />
+                      Failing agent
+                    </div>
+                    <div className="mt-2 font-mono text-sm">{failingAgent}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      Last known failing point in the inferred chain
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </div>
           </div>
           {comparisonData ? (
@@ -227,7 +215,23 @@ export default async function TraceDetailPage({
                 </div>
               </div>
             </div>
-          ) : null}
+          ) : (
+            <div className="mt-6 rounded-3xl border bg-muted/20 p-5">
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">Comparison unavailable</Badge>
+                  {baseline ? <Badge variant="outline">Baseline {baseline.trace_id}</Badge> : null}
+                </div>
+                <p className="max-w-3xl text-sm text-muted-foreground">
+                  {!baseline
+                    ? "You have not marked a baseline yet. Set a healthy or representative trace as your baseline to compare this run against it."
+                    : isCurrentBaseline
+                      ? "This trace is currently marked as the baseline, so there is nothing to compare it against here yet."
+                      : "Rifft could not build a before/after comparison for this trace yet. Try another incident or refresh after newer trace data lands."}
+                </p>
+              </div>
+            </div>
+          )}
         </section>
         <InteractiveTraceDetail
           agentDetails={agentDetails}

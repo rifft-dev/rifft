@@ -1,9 +1,0 @@
-README.md
-pyproject.toml
-src/rifft/adapters/crewai/__init__.py
-src/rifft_crewai.egg-info/PKG-INFO
-src/rifft_crewai.egg-info/SOURCES.txt
-src/rifft_crewai.egg-info/dependency_links.txt
-src/rifft_crewai.egg-info/requires.txt
-src/rifft_crewai.egg-info/top_level.txt
-tests/test_smoke.py

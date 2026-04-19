@@ -6,7 +6,7 @@
   "packageManager": "pnpm@10.6.2",
   "scripts": {
     "build": "pnpm -r build",
-    "dev": "pnpm --parallel --filter @rifft/collector --filter @rifft/api --filter @rifft/web dev",
+    "dev": "set -a && [ -f ./.env ] && . ./.env; : \"${DATABASE_URL:=postgres://${POSTGRES_USER:-rifft}:${POSTGRES_PASSWORD:-rifft}@localhost:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-rifft}}\"; export DATABASE_URL; : \"${CLICKHOUSE_URL:=http://localhost:${CLICKHOUSE_PORT:-8123}}\"; export CLICKHOUSE_URL; set +a; pnpm --parallel --filter @rifft/collector --filter @rifft/api --filter @rifft/web dev",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"

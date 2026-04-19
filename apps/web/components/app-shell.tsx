@@ -35,6 +35,13 @@ const getMobileRouteLabel = (pathname: string) => {
     };
   }
 
+  if (pathname.startsWith("/docs")) {
+    return {
+      title: "Docs",
+      description: "Browse product guides, setup steps, and debugging concepts inside the app.",
+    };
+  }
+
   if (pathname.startsWith("/onboarding")) {
     return {
       title: "Onboarding",
@@ -56,6 +63,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const isAuthRoute = pathname.startsWith("/auth");
   const isBootstrapRoute = pathname.startsWith("/bootstrap");
+  const isDocsRoute = pathname.startsWith("/docs");
   const isPublicLandingRoute = pathname === "/";
   const nextPath = searchParams.get("next") ?? defaultAuthedRoute;
   const mobileRouteLabel = getMobileRouteLabel(pathname);
@@ -66,6 +74,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
 
     if (user) {
+      if (!isAuthRoute && !isPublicLandingRoute) {
+        return;
+      }
+
       void (async () => {
         const response = await fetch("/api/cloud/current-project", { cache: "no-store" });
         if (!response.ok) {
@@ -101,13 +113,14 @@ export function AppShell({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (!isAuthRoute && !isBootstrapRoute && !isPublicLandingRoute) {
+    if (!isAuthRoute && !isBootstrapRoute && !isPublicLandingRoute && !isDocsRoute) {
       const target = pathname === "/" ? defaultAuthedRoute : pathname;
       router.replace(`/auth?next=${encodeURIComponent(target)}`);
     }
   }, [
     isAuthRoute,
     isBootstrapRoute,
+    isDocsRoute,
     isLoading,
     isPublicLandingRoute,
     nextPath,
@@ -116,12 +129,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     user,
   ]);
 
-  if (isAuthRoute || isBootstrapRoute || (isPublicLandingRoute && !user)) {
+  if (isAuthRoute || isBootstrapRoute || isPublicLandingRoute || isDocsRoute) {
     return <div className="min-h-screen bg-background">{children}</div>;
-  }
-
-  if (isPublicLandingRoute && user) {
-    return <div className="min-h-screen bg-background" />;
   }
 
   if (isLoading || !user) {

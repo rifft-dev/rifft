@@ -32,6 +32,7 @@ export function SettingsForm({
 }: SettingsFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [formState, setFormState] = useState({
     retention_days: retentionDays,
@@ -41,32 +42,46 @@ export function SettingsForm({
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setStatus(null);
-
-    const response = await fetch(`/api/projects/${projectId}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(formState),
-    });
-
-    if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
-      const message =
-        data.error === "forbidden"
-          ? "Only project owners can change settings."
-          : "Could not save settings.";
-      setStatus(message);
-      toast.error(message);
+    if (isSaving) {
       return;
     }
+    setStatus(null);
 
-    setStatus("Settings updated.");
-    toast.success("Settings updated");
-    startTransition(() => {
-      router.refresh();
-    });
+    try {
+      setIsSaving(true);
+      const response = await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(formState),
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        const message =
+          data.error === "forbidden"
+            ? "Only project owners can change settings."
+            : "Could not save settings.";
+        setStatus(message);
+        toast.error(message);
+        return;
+      }
+
+      const data = (await response.json().catch(() => ({}))) as {
+        retention_overridden_by_plan?: boolean;
+      };
+      const message = data.retention_overridden_by_plan
+        ? "Settings updated. Retention stays managed by your cloud plan."
+        : "Settings updated.";
+      setStatus(message);
+      toast.success(message);
+      startTransition(() => {
+        router.refresh();
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -137,8 +152,8 @@ export function SettingsForm({
       </div>
 
       <div className="flex items-center gap-3">
-        <Button disabled={isPending || !canUpdateSettings} type="submit">
-          {isPending ? "Saving..." : "Save thresholds"}
+        <Button disabled={isPending || isSaving || !canUpdateSettings} type="submit">
+          {isPending || isSaving ? "Saving..." : "Save thresholds"}
         </Button>
         {status ? <span className="text-sm text-muted-foreground">{status}</span> : null}
         {!canUpdateSettings ? (

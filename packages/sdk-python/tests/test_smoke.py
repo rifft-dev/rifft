@@ -154,13 +154,20 @@ class FakeTracer:
 
 class PythonSdkSmokeTest(unittest.TestCase):
     def setUp(self) -> None:
-        core._config = core._Config(project_id="smoke-project", endpoint="http://localhost:4318", api_key=None)
+        core._config = core._Config(
+            project_id="smoke-project",
+            endpoint="http://localhost:4318",
+            api_key=None,
+            service_name="smoke-service",
+        )
+        core._provider_initialized = False
         self.recorded_spans: list[FakeSpan] = []
         self.get_tracer = mock.patch("rifft.core._get_tracer", return_value=FakeTracer(self.recorded_spans))
         self.get_tracer.start()
 
     def tearDown(self) -> None:
         self.get_tracer.stop()
+        core._provider_initialized = False
 
     def test_span_context_records_attributes_and_decisions(self) -> None:
         with rifft.span("tool_call", agent_id="researcher", framework="crewai") as span:
@@ -217,6 +224,40 @@ class PythonSdkSmokeTest(unittest.TestCase):
         self.assertEqual(len(recorded.exceptions), 1)
         self.assertEqual(type(recorded.exceptions[0]).__name__, "ValueError")
         self.assertEqual(recorded.attributes["exception.type"], "ValueError")
+
+    def test_init_uses_env_defaults_and_service_name_detection(self) -> None:
+        with (
+            mock.patch.dict(
+                "os.environ",
+                {
+                    "RIFFT_PROJECT_ID": "env-project",
+                    "RIFFT_ENDPOINT": "https://ingest.rifft.dev",
+                    "RIFFT_API_KEY": "rft_live_test",
+                },
+                clear=False,
+            ),
+            mock.patch("rifft.core.Path.cwd", return_value=Path("/tmp/crew-app")),
+            mock.patch("rifft.core._ensure_provider") as ensure_provider,
+            mock.patch("rifft.core._auto_instrument_frameworks", return_value=()),
+        ):
+            rifft.init()
+
+        ensure_provider.assert_called_once_with()
+        self.assertIsNotNone(core._config)
+        self.assertEqual(core._config.project_id, "env-project")
+        self.assertEqual(core._config.endpoint, "https://ingest.rifft.dev")
+        self.assertEqual(core._config.api_key, "rft_live_test")
+        self.assertEqual(core._config.service_name, "crew-app")
+
+    def test_init_auto_instruments_supported_frameworks(self) -> None:
+        with (
+            mock.patch("rifft.core._ensure_provider") as ensure_provider,
+            mock.patch("rifft.core._auto_instrument_frameworks", return_value=("crewai", "autogen")) as auto_instrument,
+        ):
+            rifft.init(project_id="proj_test", endpoint="http://localhost:4318")
+
+        auto_instrument.assert_called_once_with()
+        ensure_provider.assert_called_once_with()
 
 
 if __name__ == "__main__":

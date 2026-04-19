@@ -18,9 +18,13 @@ type Member = {
 export function InviteMemberCard({
   projectId,
   canManage,
+  isFreePlan = false,
+  workspaceName,
 }: {
   projectId: string;
   canManage: boolean;
+  isFreePlan?: boolean;
+  workspaceName: string;
 }) {
   const router = useRouter();
   const [members, setMembers] = useState<Member[]>([]);
@@ -72,22 +76,22 @@ export function InviteMemberCard({
         const data = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(
           data.error === "forbidden"
-            ? "Only project owners can invite members."
+            ? "Only workspace owners can invite members."
             : data.error === "already_member"
-              ? "That person is already a member of this project."
+              ? "That person is already a member of this workspace."
               : data.error === "cannot_invite_self"
                 ? "You can't invite yourself — you're already the owner."
                 : data.error === "member_limit_reached"
-                  ? "Free plan includes 1 additional member. Upgrade to Pro for unlimited members."
+                  ? "Free accounts include 1 additional member. Upgrade to Pro for unlimited members."
                   : "Could not send the invitation.",
         );
       }
 
       const data = (await response.json()) as { pending?: boolean };
       if (data.pending) {
-        toast.success(`Invite saved for ${email.trim()}. They'll get access as soon as they sign up.`);
+        toast.success(`Invite saved for ${email.trim()} to ${workspaceName}.`);
       } else {
-        toast.success(`${email.trim()} has been added to the project.`);
+        toast.success(`${email.trim()} added to ${workspaceName}.`);
       }
 
       setEmail("");
@@ -126,15 +130,22 @@ export function InviteMemberCard({
           const data = (await response.json().catch(() => ({}))) as { error?: string };
           throw new Error(
             data.error === "forbidden"
-              ? "Only project owners can remove members."
+              ? "Only workspace owners can remove members."
               : data.error === "cannot_remove_owner"
-                ? "The project owner cannot be removed."
+                ? "The workspace owner cannot be removed."
                 : "Could not remove this member.",
           );
         }
-        toast.success(`Removed ${identifier} from the project.`);
+        toast.success(`Removed ${identifier} from ${workspaceName}.`);
       }
 
+      setMembers((current) =>
+        current.filter((existing) =>
+          member.status === "pending"
+            ? existing.user_email !== member.user_email
+            : existing.user_id !== member.user_id,
+        ),
+      );
       await loadMembers();
       router.refresh();
     } catch (error) {
@@ -147,37 +158,49 @@ export function InviteMemberCard({
   return (
     <div className="space-y-4">
       {canManage ? (
-        <div className="flex gap-2">
-          <Input
-            type="email"
-            placeholder="colleague@company.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void invite();
-              }
-            }}
-            disabled={isInviting}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            disabled={isInviting || !email.trim()}
-            onClick={() => void invite()}
-          >
-            {isInviting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <UserPlus className="h-4 w-4" />
-            )}
-            {isInviting ? "Inviting…" : "Invite"}
-          </Button>
+        <div className="space-y-3">
+          {isFreePlan ? (
+            <p className="text-xs text-muted-foreground">
+              Free accounts include 1 additional member.{" "}
+              <a href="/settings" className="underline underline-offset-2">
+                Upgrade to Pro
+              </a>{" "}
+              for unlimited members.
+            </p>
+          ) : null}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input
+              type="email"
+              placeholder="colleague@company.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void invite();
+                }
+              }}
+              disabled={isInviting}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              disabled={isInviting || !email.trim()}
+              onClick={() => void invite()}
+            >
+              {isInviting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <UserPlus className="h-4 w-4" />
+              )}
+              {isInviting ? "Inviting…" : "Invite"}
+            </Button>
+          </div>
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">
-          Only project owners can invite or remove members.
+          Only workspace owners can invite or remove members.
         </p>
       )}
 
@@ -204,7 +227,9 @@ export function InviteMemberCard({
         </div>
       ) : members.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No other members yet. Invite someone to give them access to this project's traces.
+          No other members yet. Invite teammates to the{" "}
+          <span className="font-medium text-foreground">{workspaceName}</span>{" "}
+          workspace.
         </p>
       ) : (
         <div className="space-y-2">

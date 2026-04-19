@@ -33,6 +33,20 @@ type FirstTraceResponse = {
 
 type FirstTraceError = "unauthorized" | "forbidden" | "missing_active_project" | "network_error" | null;
 
+type FrameworkOption = "crewai" | "autogen" | "custom";
+
+const frameworkPackages: Record<FrameworkOption, string> = {
+  crewai: "rifft-sdk rifft-crewai",
+  autogen: "rifft-sdk rifft-autogen",
+  custom: "rifft-sdk",
+};
+
+const frameworkImports: Record<FrameworkOption, string[]> = {
+  crewai: ["import rifft"],
+  autogen: ["import rifft"],
+  custom: ["import rifft"],
+};
+
 const maskApiKey = (value: string) => `${value.slice(0, 10)}...${value.slice(-6)}`;
 
 export function FirstTraceOnboarding({
@@ -45,23 +59,23 @@ export function FirstTraceOnboarding({
   const [hasCopiedKey, setHasCopiedKey] = useState(false);
   const [status, setStatus] = useState("Waiting for your first trace…");
   const [pollingStartedAt] = useState(Date.now());
-  const [elapsedSeconds, setElapsedSeconds] = useState(1);
+ const [isSlowStart, setIsSlowStart] = useState(false);
   const [firstTraceId, setFirstTraceId] = useState<string | null>(null);
   const [isStartingCheckout, setIsStartingCheckout] = useState(false);
   const [pollingError, setPollingError] = useState<FirstTraceError>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
+  const [framework, setFramework] = useState<FrameworkOption>("crewai");
   const installSnippet = useMemo(
-    () => `pip install rifft-sdk rifft-crewai
+    () => `pip install ${frameworkPackages[framework]}
 
-import rifft
-import rifft.adapters.crewai
+${frameworkImports[framework].join("\n")}
 
 rifft.init(
   project_id="${project.id}",
   endpoint="${ingestUrl}",
   api_key="${project.api_key ?? "rft_live_..."}"
 )`,
-    [ingestUrl, project.api_key, project.id],
+    [framework, ingestUrl, project.api_key, project.id],
   );
 
   useEffect(() => {
@@ -146,22 +160,17 @@ rifft.init(
   }, [firstTraceId, onboardingStartedAt, preferredPlan, router]);
 
   const showProSuccessState = preferredPlan === "pro" && Boolean(firstTraceId);
+  const canShowSnippet = Boolean(project.api_key);
 
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      setElapsedSeconds(Math.max(1, Math.round((Date.now() - pollingStartedAt) / 1000)));
-    }, 1000);
-
-    return () => window.clearInterval(interval);
-  }, [pollingStartedAt]);
-
-  useEffect(() => {
-    if (firstTraceId || pollingError || elapsedSeconds < 60) {
-      return;
+  const timer = window.setTimeout(() => {
+    if (!firstTraceId && !pollingError) {
+      setIsSlowStart(true);
     }
+  }, 20_000);
 
-    setStatus("Still waiting. Check the project ID, endpoint, and API key in your SDK setup.");
-  }, [elapsedSeconds, firstTraceId, pollingError]);
+  return () => window.clearTimeout(timer);
+}, [firstTraceId, pollingError]);
 
   return (
     <div className="space-y-8 px-6 py-8 lg:px-8">
@@ -247,27 +256,48 @@ rifft.init(
 
             <div className="space-y-3">
               <div className="text-sm font-medium">Install and send your first trace</div>
-              <pre className="overflow-x-auto rounded-2xl border bg-muted/30 p-4 text-xs leading-6">
-                <code>{installSnippet}</code>
-              </pre>
               <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(installSnippet);
-                    toast.success("Setup snippet copied");
-                  }}
-                >
-                  <Copy className="h-4 w-4" />
-                  Copy snippet
-                </Button>
-                {hasCopiedKey ? (
-                  <span className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs text-muted-foreground">
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                    API key copied
-                  </span>
-                ) : null}
+                {(["crewai", "autogen", "custom"] as const).map((option) => (
+                  <Button
+                    key={option}
+                    type="button"
+                    variant={framework === option ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setFramework(option)}
+                  >
+                    {option === "crewai" ? "CrewAI" : option === "autogen" ? "AutoGen" : "Custom"}
+                  </Button>
+                ))}
               </div>
+              {!canShowSnippet ? (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-muted-foreground">
+                  Ask a project owner to copy this snippet for you. Hosted API keys are only visible to owners, so this setup cannot be completed from a member account alone.
+                </div>
+              ) : (
+                <>
+                  <pre className="overflow-x-auto rounded-2xl border bg-muted/30 p-4 text-xs leading-6">
+                    <code>{installSnippet}</code>
+                  </pre>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(installSnippet);
+                        toast.success("Setup snippet copied");
+                      }}
+                    >
+                      <Copy className="h-4 w-4" />
+                      Copy snippet
+                    </Button>
+                    {hasCopiedKey ? (
+                      <span className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs text-muted-foreground">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        API key copied
+                      </span>
+                    ) : null}
+                  </div>
+                </>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -317,14 +347,14 @@ rifft.init(
                             throw new Error(
                               data.error === "forbidden"
                                 ? "Only the billing owner can start the Pro upgrade."
-                                : (data.error ?? "Could not create Polar checkout"),
+                                : (data.error ?? "Could not create Stripe checkout"),
                             );
                           }
 
                           window.location.href = data.url;
                         } catch (error) {
                           toast.error(
-                            error instanceof Error ? error.message : "Could not create Polar checkout",
+                            error instanceof Error ? error.message : "Could not create Stripe checkout",
                           );
                           setIsStartingCheckout(false);
                         }
@@ -340,16 +370,10 @@ rifft.init(
                 </div>
               ) : (
                 <>
-                  <div className="mt-4 flex items-center gap-3 text-sm text-muted-foreground">
-                    <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-primary" />
-                    <span>
-                      Listening for spans
-                      {lastCheckedAt
-                        ? ` · last checked ${lastCheckedAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
-                        : " · checking now…"}
-                    </span>
-                    <span className="ml-auto tabular-nums">{elapsedSeconds}s</span>
-                  </div>
+                 <div className="mt-4 flex items-center gap-3 text-sm text-muted-foreground">
+  <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-primary" />
+  <span>Listening for spans · checking every few seconds</span>
+</div>
                 </>
               )}
             </div>
@@ -371,6 +395,16 @@ rifft.init(
                     {project.api_key
                       ? "Use the hosted API key for this project, not a local or old key."
                       : "Ask a project owner to reveal or rotate the hosted API key first."}
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" />
+                  <span>
+                    {framework === "crewai"
+                      ? <>If <code>rifft-crewai</code> is installed, <code>rifft.init(...)</code> auto-instruments CrewAI for you.</>
+                      : framework === "autogen"
+                        ? <>If <code>rifft-autogen</code> is installed, <code>rifft.init(...)</code> auto-instruments AutoGen for you.</>
+                        : <>Use the base SDK for custom loops, then add framework-specific adapters as needed.</>}
                   </span>
                 </li>
               </ul>
@@ -398,27 +432,20 @@ rifft.init(
                   </span>
                 </li>
               </ul>
-              {elapsedSeconds >= 45 && !firstTraceId && !pollingError ? (
-                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200">
-                  Still waiting after {elapsedSeconds}s. The most common cause is a mismatched
-                  project ID, endpoint, or API key.
-                </div>
-              ) : null}
-              {elapsedSeconds >= 90 && !firstTraceId && !pollingError ? (
-                <div className="rounded-2xl border border-border bg-background/70 p-4 text-sm text-muted-foreground">
-                  If you want to sanity-check the product path itself, try rerunning the snippet
-                  with a tiny test invocation so Rifft has one clear hosted event to receive.
-                </div>
-              ) : null}
+             {isSlowStart && !firstTraceId && !pollingError ? (
+  <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200">
+    Still waiting. The most common cause is a mismatched project ID, endpoint, or API key.
+  </div>
+) : null}
               {pollingError ? (
                 <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200">
-                  {pollingError === "unauthorized"
-                    ? "Your session expired. Sign in again and Rifft will resume listening."
-                    : pollingError === "forbidden"
-                      ? "This project is no longer available to your account."
-                      : pollingError === "missing_active_project"
-                        ? "Choose an active project again before continuing."
-                        : "The app could not reach the hosted API. Refresh the page and try again."}
+                 {pollingError === "unauthorized"
+  ? "Your session expired. Sign in again and Rifft will resume listening."
+  : pollingError === "forbidden"
+    ? "This project is no longer available to your account."
+    : pollingError === "missing_active_project"
+      ? "Choose an active project again before continuing."
+      : "Rifft couldn't reach the API to check — your trace won't be lost. Refresh the page to try again."}
                 </div>
               ) : null}
             </div>

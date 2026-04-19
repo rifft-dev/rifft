@@ -5,23 +5,32 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   Activity,
-  AlertTriangle,
-  ArrowRight,
-  CheckCircle2,
+  BookOpen,
+  EllipsisVertical,
   LogIn,
   LogOut,
   Moon,
-  RadioTower,
+  Plus,
   Settings,
-  Sparkles,
   Sun,
   Workflow,
 } from "lucide-react";
 import { useTheme } from "next-themes";
+import { toast } from "sonner";
 import { useAuth } from "@/components/auth-provider";
+import { createCloudWorkspace, createPlanCheckout } from "@/app/lib/client-api";
 import { RifftLogo } from "@/components/rifft-logo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,7 +39,17 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectItemIndicator,
+  SelectItemText,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -39,20 +58,27 @@ const navItems = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
+const docsHref = process.env.NEXT_PUBLIC_DOCS_URL ?? "/docs";
+const docsIsExternal = docsHref.startsWith("http://") || docsHref.startsWith("https://");
+
 type CloudProject = {
   id: string;
   name: string;
+  account_role?: "owner" | "member" | null;
 };
 
 type SidebarSummary = {
   project: {
     id: string;
     name: string;
+    permissions?: {
+      can_manage_billing?: boolean;
+    };
   } | null;
   usage: {
     plan: {
       name: string;
-      key: "free" | "pro";
+      key: "free" | "pro" | "scale";
       retention_days: number;
     };
     usage: {
@@ -71,21 +97,6 @@ type SidebarSummary = {
       status: "ok" | "error" | "unset";
     } | null;
   };
-};
-
-type TraceFocusSummary = {
-  trace_id: string;
-  started_at: string;
-  duration_ms: number;
-  status: "ok" | "error" | "unset";
-  primary_failure: {
-    mode: string;
-    severity: "benign" | "fatal";
-    agent_id: string | null;
-    explanation: string;
-  } | null;
-  root_cause_agent_id: string | null;
-  failing_agent_id: string | null;
 };
 
 const getUserLabel = (email?: string | null) => {
@@ -114,39 +125,53 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
   const [projects, setProjects] = useState<CloudProject[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string>("");
   const [summary, setSummary] = useState<SidebarSummary | null>(null);
-  const [traceFocusSummary, setTraceFocusSummary] = useState<TraceFocusSummary | null>(null);
   const [isSwitchingProject, setIsSwitchingProject] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
+  const [checkoutPlan, setCheckoutPlan] = useState<"pro" | "scale" | null>(null);
 
-  const formatSpanCount = (value: number) => new Intl.NumberFormat("en-US").format(value);
-  const formatDuration = (value: number) => {
-    if (value >= 1000) {
-      return `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)}s`;
+  const reloadSidebarData = async (token: string) => {
+    const [projectsResponse, currentProjectResponse, summaryResponse] = await Promise.all([
+      fetch("/api/cloud/projects", {
+        headers: {
+          authorization: `Bearer ${token}`,
+        },
+      }),
+      fetch("/api/cloud/current-project", {
+        cache: "no-store",
+      }),
+      fetch("/api/cloud/sidebar-summary", {
+        cache: "no-store",
+      }),
+    ]);
+
+    if (!projectsResponse.ok) {
+      if (projectsResponse.status === 401) {
+        setSessionExpired(true);
+      }
+      throw new Error("Could not load workspaces");
     }
 
-    return `${Math.round(value)}ms`;
-  };
-  const formatRelativeTime = (iso: string) => {
-    const diffMs = new Date(iso).getTime() - Date.now();
-    const diffMinutes = Math.round(diffMs / 60_000);
-    if (Math.abs(diffMinutes) < 60) {
-      return new Intl.RelativeTimeFormat("en", { numeric: "auto" }).format(diffMinutes, "minute");
+    setSessionExpired(false);
+
+    const data = (await projectsResponse.json()) as { projects: CloudProject[] };
+    setProjects(data.projects);
+    const currentProject =
+      currentProjectResponse.ok
+        ? ((await currentProjectResponse.json()) as { projectId?: string | null }).projectId ?? null
+        : null;
+    setActiveProjectId(currentProject ?? data.projects[0]?.id ?? "");
+    if (summaryResponse.ok) {
+      setSummary((await summaryResponse.json()) as SidebarSummary);
     }
-    const diffHours = Math.round(diffMs / 3_600_000);
-    if (Math.abs(diffHours) < 24) {
-      return new Intl.RelativeTimeFormat("en", { numeric: "auto" }).format(diffHours, "hour");
-    }
-    const diffDays = Math.round(diffMs / 86_400_000);
-    return new Intl.RelativeTimeFormat("en", { numeric: "auto" }).format(diffDays, "day");
   };
-  const isTraceDetailRoute = pathname.startsWith("/traces/") && pathname !== "/traces";
-  const currentTraceId = isTraceDetailRoute ? pathname.split("/")[2] ?? null : null;
+
   const closeMobileNav = () => {
     onNavigate?.();
   };
-
-  if (!user) {
-    return null;
-  }
 
   useEffect(() => {
     if (!accessToken) {
@@ -156,37 +181,13 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
     let cancelled = false;
 
     const loadProjects = async () => {
-      const [projectsResponse, currentProjectResponse, summaryResponse] = await Promise.all([
-        fetch("/api/cloud/projects", {
-          headers: {
-            authorization: `Bearer ${accessToken}`,
-          },
-        }),
-        fetch("/api/cloud/current-project", {
-          cache: "no-store",
-        }),
-        fetch("/api/cloud/sidebar-summary", {
-          cache: "no-store",
-        }),
-      ]);
-
-      if (!projectsResponse.ok) {
+      try {
+        await reloadSidebarData(accessToken);
+      } catch {
         return;
       }
-
-      const data = (await projectsResponse.json()) as { projects: CloudProject[] };
       if (cancelled) {
         return;
-      }
-
-      setProjects(data.projects);
-      const currentProject =
-        currentProjectResponse.ok
-          ? ((await currentProjectResponse.json()) as { projectId?: string | null }).projectId ?? null
-          : null;
-      setActiveProjectId(currentProject ?? data.projects[0]?.id ?? "");
-      if (summaryResponse.ok) {
-        setSummary((await summaryResponse.json()) as SidebarSummary);
       }
     };
 
@@ -195,159 +196,53 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
     return () => {
       cancelled = true;
     };
-  }, [accessToken]);
+  }, [accessToken, pathname]);
 
-  useEffect(() => {
-    if (!currentTraceId) {
-      setTraceFocusSummary(null);
-      return;
-    }
+  if (!user) {
+    return null;
+  }
 
-    let cancelled = false;
-
-    const loadTraceFocus = async () => {
-      const response = await fetch(`/api/cloud/trace-focus?traceId=${encodeURIComponent(currentTraceId)}`, {
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        if (!cancelled) {
-          setTraceFocusSummary(null);
-        }
-        return;
-      }
-
-      const data = (await response.json()) as TraceFocusSummary;
-      if (!cancelled) {
-        setTraceFocusSummary(data);
-      }
-    };
-
-    void loadTraceFocus();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [currentTraceId]);
-
-  const latestIncidentId = summary?.traces.latestIncident?.trace_id ?? null;
-  const latestTraceId = summary?.traces.latest?.trace_id ?? null;
-  const hasTraces = (summary?.traces.total ?? 0) > 0;
-  const isViewingLatestIncident = Boolean(currentTraceId && latestIncidentId && currentTraceId === latestIncidentId);
-  const isViewingLatestTrace = Boolean(currentTraceId && latestTraceId && currentTraceId === latestTraceId);
-  const traceSeverity = traceFocusSummary?.primary_failure?.severity ?? null;
-  const traceTone =
-    traceSeverity === "fatal" || traceFocusSummary?.status === "error"
-      ? {
-          card: "border-destructive/40 bg-destructive/10",
-          badge: "border-destructive/40 bg-destructive/15 text-destructive",
-          accent: "text-destructive",
-        }
-      : traceFocusSummary?.status === "ok"
-        ? {
-            card: "border-emerald-500/30 bg-emerald-500/8",
-            badge: "border-emerald-500/30 bg-emerald-500/12 text-emerald-700 dark:text-emerald-300",
-            accent: "text-emerald-700 dark:text-emerald-300",
-          }
-        : {
-            card: "border-sidebar-border/70 bg-sidebar",
-            badge: "border-sidebar-border/70 bg-sidebar-accent text-foreground",
-            accent: "text-foreground",
-          };
-  const nextAction = !hasTraces
-    ? {
-        href: "/onboarding",
-        label: "Resume onboarding",
-        description: "Send your first trace and watch it appear live.",
-        icon: RadioTower,
-      }
-    : latestIncidentId
-      ? {
-          href: `/traces/${latestIncidentId}`,
-          label: "Open latest incident",
-          description: "Jump straight into the failing run worth checking first.",
-          icon: AlertTriangle,
-        }
-      : latestTraceId
-        ? {
-            href: `/traces/${latestTraceId}`,
-            label: "Open latest trace",
-            description: "Review the freshest run in the current project.",
-            icon: CheckCircle2,
-          }
-        : {
-            href: "/traces",
-            label: "Open incident queue",
-            description: "Review captured traces and pick the next run to inspect.",
-            icon: Workflow,
-          };
-  const NextActionIcon = nextAction.icon;
-  const traceFocus = currentTraceId
-    ? {
-        eyebrow: isViewingLatestIncident
-          ? "Investigating active incident"
-          : isViewingLatestTrace
-            ? "Reviewing latest trace"
-            : "Inspecting trace detail",
-        title: currentTraceId,
-        description: isViewingLatestIncident
-          ? "You are already inside the run Rifft thinks is most urgent."
-          : "Stay on this trace for context, or jump back to the queue when you are ready.",
-        primaryHref: "/traces",
-        primaryLabel: "Back to queue",
-        secondaryHref:
-          latestIncidentId && latestIncidentId !== currentTraceId
-            ? `/traces/${latestIncidentId}`
-            : latestTraceId && latestTraceId !== currentTraceId
-              ? `/traces/${latestTraceId}`
-              : null,
-        secondaryLabel:
-          latestIncidentId && latestIncidentId !== currentTraceId
-            ? "Open latest incident"
-            : latestTraceId && latestTraceId !== currentTraceId
-              ? "Open latest trace"
-              : null,
-      }
-    : null;
+  const planKey = summary?.usage?.plan.key ?? "free";
+  const canManageBilling = summary?.project?.permissions?.can_manage_billing ?? false;
+  const canCreateWorkspace = canManageBilling && planKey !== "free";
 
   return (
     <aside
       className={cn(
-        "shrink-0 bg-[radial-gradient(circle_at_top,hsl(var(--chart-1))/0.08,transparent_28%),hsl(var(--sidebar-background))] text-sidebar-foreground",
+        "shrink-0 overflow-hidden bg-[radial-gradient(circle_at_top,hsl(var(--chart-1))/0.08,transparent_28%),hsl(var(--sidebar-background))] text-sidebar-foreground",
         mobile
           ? "flex h-full w-full flex-col"
-          : "hidden w-72 border-r border-sidebar-border lg:flex lg:flex-col",
+          : "hidden w-56 border-r border-sidebar-border lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col",
       )}
     >
-      <div className="border-b border-sidebar-border px-5 py-5">
-        <div className="space-y-4">
-          <RifftLogo className="text-foreground" />
-          <div className="rounded-2xl border border-sidebar-border bg-sidebar-accent/70 p-4">
-            <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-              <Sparkles className="h-3.5 w-3.5" />
-              Rifft Cloud
-            </div>
-            <p className="mt-3 text-sm text-muted-foreground">
-              Keep the active project in view and move quickly from first trace to root cause.
-            </p>
-          </div>
-        </div>
+      <div className="border-b border-sidebar-border px-4 py-4">
+        <RifftLogo wordmark={false} className="h-6 w-auto text-foreground" />
 
-        <div className="mt-4 rounded-2xl border border-sidebar-border bg-sidebar-accent p-4">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                Active project
-              </div>
-              {summary?.usage ? (
-                <span className="rounded-full border border-sidebar-border px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                  {summary.usage.plan.name}
-                </span>
-              ) : null}
-            </div>
+        <div className="mt-4">
+          {projects.length > 1 ? (
             <Select
               value={activeProjectId}
               onValueChange={async (projectId) => {
+                if (projectId === "__new_workspace__") {
+                  if (!canManageBilling) {
+                    toast.error(
+                      "Only the account owner can create workspaces in this account. Create your own workspace to start a separate plan.",
+                    );
+                    router.push("/settings#workspaces");
+                  } else if (canCreateWorkspace) {
+                    setNewWorkspaceOpen(true);
+                  } else {
+                    setUpgradeOpen(true);
+                  }
+                  return;
+                }
+
+                if (projectId === "__manage_workspaces__") {
+                  router.push("/settings#workspaces");
+                  closeMobileNav();
+                  return;
+                }
+
                 setActiveProjectId(projectId);
                 setIsSwitchingProject(true);
                 await fetch("/api/cloud/active-project", {
@@ -357,11 +252,8 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
                   },
                   body: JSON.stringify({ projectId }),
                 });
-                const summaryResponse = await fetch("/api/cloud/sidebar-summary", {
-                  cache: "no-store",
-                });
-                if (summaryResponse.ok) {
-                  setSummary((await summaryResponse.json()) as SidebarSummary);
+                if (accessToken) {
+                  await reloadSidebarData(accessToken);
                 }
                 router.refresh();
                 if (pathname.startsWith("/traces/")) {
@@ -371,135 +263,45 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
                 closeMobileNav();
               }}
             >
-              <SelectTrigger className="border-sidebar-border bg-sidebar text-sidebar-foreground">
+              <SelectTrigger className="h-11 !border-0 bg-transparent px-0 text-sidebar-foreground shadow-none ring-0 ring-offset-0 hover:bg-transparent focus:ring-0 focus:ring-offset-0">
                 <SelectValue placeholder="Choose project" />
               </SelectTrigger>
               <SelectContent>
                 {projects.map((project) => (
                   <SelectItem key={project.id} value={project.id}>
-                    {project.name}
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="truncate">{project.name}</span>
+                      <span className="rounded-full border px-1.5 py-0 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                        {project.account_role === "owner" ? "Personal" : "Shared"}
+                      </span>
+                    </div>
                   </SelectItem>
                 ))}
+                <SelectSeparator />
+                <SelectItem value="__new_workspace__">
+                  <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center text-emerald-500">
+                    <Plus className="h-4 w-4" />
+                  </span>
+                  <SelectItemText>New workspace</SelectItemText>
+                  <SelectItemIndicator />
+                </SelectItem>
+                <SelectItem value="__manage_workspaces__">
+                  <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center text-muted-foreground">
+                    <Settings className="h-4 w-4" />
+                  </span>
+                  <SelectItemText>Manage account workspaces</SelectItemText>
+                  <SelectItemIndicator />
+                </SelectItem>
               </SelectContent>
             </Select>
-            <div className="space-y-1 text-xs text-muted-foreground">
-              <div>{isSwitchingProject ? "Switching project…" : summary?.project?.name ?? "Authenticated cloud workspace"}</div>
-              {summary?.usage ? (
-                <div>
-                  {formatSpanCount(summary.usage.usage.used_spans)} /{" "}
-                  {formatSpanCount(summary.usage.usage.included_spans)} spans this month
-                </div>
-              ) : (
-                <div>Choose where Rifft should look next.</div>
-              )}
+          ) : (
+            <div className="px-2 py-2 text-sm font-medium">
+              {projects[0]?.name ?? "Workspace"}
             </div>
-          </div>
+          )}
         </div>
       </div>
-      <nav className="flex-1 px-4 py-5">
-        {traceFocus ? (
-          <div
-            className={cn(
-              "mb-6 rounded-2xl border p-4 transition-colors",
-              traceFocusSummary ? traceTone.card : "border-sidebar-border bg-sidebar-accent/70",
-            )}
-          >
-            <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-              {traceFocus.eyebrow}
-            </div>
-            <div className="mt-2 text-sm font-medium leading-snug">{traceFocus.title}</div>
-            <p className="mt-2 text-sm text-muted-foreground">{traceFocus.description}</p>
-            {traceFocusSummary ? (
-              <div className="mt-3 space-y-2 rounded-xl border border-sidebar-border/70 bg-sidebar/80 px-3 py-3 text-xs shadow-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-muted-foreground">Status</span>
-                  <span
-                    className={cn(
-                      "rounded-full border px-2 py-1 text-[10px] font-medium uppercase tracking-[0.12em]",
-                      traceTone.badge,
-                    )}
-                  >
-                    {traceFocusSummary.status}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-muted-foreground">Started</span>
-                  <span className="font-medium">{formatRelativeTime(traceFocusSummary.started_at)}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-muted-foreground">Duration</span>
-                  <span className="font-medium">{formatDuration(traceFocusSummary.duration_ms)}</span>
-                </div>
-                {traceFocusSummary.primary_failure ? (
-                  <div className="border-t border-sidebar-border/70 pt-2">
-                    <div className="text-muted-foreground">Primary failure</div>
-                    <div className={cn("mt-1 font-medium leading-snug", traceTone.accent)}>
-                      {traceFocusSummary.primary_failure.mode}
-                    </div>
-                    <div className="mt-1 text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
-                      {traceFocusSummary.primary_failure.severity === "fatal" ? "Fatal failure" : "Benign failure"}
-                    </div>
-                  </div>
-                ) : null}
-                {traceFocusSummary.root_cause_agent_id ? (
-                  <div className="border-t border-sidebar-border/70 pt-2">
-                    <div className="text-muted-foreground">Root cause agent</div>
-                    <div className="mt-1 truncate font-mono text-[11px]">
-                      {traceFocusSummary.root_cause_agent_id}
-                    </div>
-                  </div>
-                ) : null}
-                {traceFocusSummary.failing_agent_id &&
-                traceFocusSummary.failing_agent_id !== traceFocusSummary.root_cause_agent_id ? (
-                  <div className="border-t border-sidebar-border/70 pt-2">
-                    <div className="text-muted-foreground">Failing agent</div>
-                    <div className="mt-1 truncate font-mono text-[11px]">
-                      {traceFocusSummary.failing_agent_id}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-            <Button asChild className="mt-3 w-full justify-between rounded-xl">
-              <Link href={traceFocus.primaryHref} onClick={closeMobileNav}>
-                {traceFocus.primaryLabel}
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </Button>
-            {traceFocus.secondaryHref && traceFocus.secondaryLabel ? (
-              <Button asChild variant="ghost" className="mt-2 w-full justify-between rounded-xl">
-                <Link href={traceFocus.secondaryHref} onClick={closeMobileNav}>
-                  {traceFocus.secondaryLabel}
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-              </Button>
-            ) : null}
-          </div>
-        ) : (
-          <div className="mb-6 rounded-2xl border border-sidebar-border bg-sidebar-accent/70 p-4">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <NextActionIcon className="h-4 w-4" />
-              Next best action
-            </div>
-            <p className="mt-2 text-sm text-muted-foreground">{nextAction.description}</p>
-            <Button asChild className="mt-3 w-full justify-between rounded-xl">
-              <Link href={nextAction.href} onClick={closeMobileNav}>
-                {nextAction.label}
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </Button>
-            {summary?.traces.total ? (
-              <p className="mt-2 text-xs text-muted-foreground">
-                {summary.traces.total} trace{summary.traces.total === 1 ? "" : "s"} captured in this project
-              </p>
-            ) : null}
-          </div>
-        )}
-
-        <div className="mb-3 flex items-center gap-2 px-2 text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-          <Activity className="h-3.5 w-3.5" />
-          Workspace
-        </div>
+      <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
         <div className="space-y-2">
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -511,55 +313,44 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
                 className={cn(
                   "flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition-colors",
                   active
-                    ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
-                    : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                    ? "bg-white/8 text-white shadow-sm"
+                    : "text-sidebar-foreground/70 hover:bg-white/5 hover:text-sidebar-foreground",
                 )}
                 onClick={closeMobileNav}
               >
                 <Icon className="h-4 w-4" />
-                <div className="flex flex-1 items-center justify-between gap-3">
-                  <span>{item.label}</span>
-                  {active ? <span className="text-[10px] uppercase tracking-[0.14em] opacity-80">Open</span> : null}
-                </div>
+                <span>{item.label}</span>
               </Link>
             );
           })}
         </div>
-        <div className="mt-6 rounded-2xl border border-sidebar-border bg-sidebar-accent/60 p-4">
-          <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-            Project status
-          </div>
-          <div className="mt-3 space-y-2 text-sm">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">State</span>
-              <span className="font-medium">
-                {!hasTraces ? "Waiting for first trace" : latestIncidentId ? "Incident detected" : "Healthy recent runs"}
-              </span>
-            </div>
-            {summary?.usage ? (
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">Retention</span>
-                <span className="font-medium">{summary.usage.plan.retention_days} days</span>
-              </div>
-            ) : null}
-            {currentTraceId ? (
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">In focus</span>
-                <span className="max-w-[8rem] truncate font-medium">{currentTraceId}</span>
-              </div>
-            ) : null}
-          </div>
-          <Button asChild variant="ghost" className="mt-3 -ml-3">
-            <Link href="/settings" onClick={closeMobileNav}>
-              Open settings
-            </Link>
-          </Button>
+        <div className="mt-6 border-t border-sidebar-border pt-4">
+          <Link
+            href={docsHref}
+            className={cn(
+              "flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition-colors",
+              !docsIsExternal && pathname === "/docs"
+                ? "bg-white/8 text-white shadow-sm"
+                : "text-sidebar-foreground/70 hover:bg-white/5 hover:text-sidebar-foreground",
+            )}
+            target="_blank"
+            rel="noreferrer"
+            onClick={closeMobileNav}
+          >
+            <BookOpen className="h-4 w-4" />
+            <span>Docs</span>
+          </Link>
         </div>
+        {sessionExpired ? (
+          <p className="px-4 pt-3 text-xs text-amber-700 dark:text-amber-300">
+            Session expired. Refresh to resume project updates.
+          </p>
+        ) : null}
       </nav>
-      <div className="mt-auto space-y-3 border-t border-sidebar-border p-3">
+      <div className="mt-auto border-t border-sidebar-border bg-sidebar-background/95 p-3 backdrop-blur supports-[backdrop-filter]:bg-sidebar-background/85">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex w-full items-center gap-3 rounded-2xl border border-sidebar-border bg-sidebar-accent p-3 text-left transition-colors hover:bg-sidebar-accent/80">
+            <button className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-sidebar-accent/80">
               <Avatar className="h-9 w-9">
                 <AvatarImage src={user.user_metadata.avatar_url as string | undefined} />
                 <AvatarFallback>{getInitials(user.email)}</AvatarFallback>
@@ -568,6 +359,7 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
                 <div className="truncate text-sm font-medium">{getUserLabel(user.email)}</div>
                 <div className="truncate text-xs text-muted-foreground">{user.email}</div>
               </div>
+              <EllipsisVertical className="h-4 w-4 text-muted-foreground" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-64">
@@ -580,6 +372,15 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
             <DropdownMenuItem
               onSelect={(event) => {
                 event.preventDefault();
+                setTheme(theme === "dark" ? "light" : "dark");
+              }}
+            >
+              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              {theme === "dark" ? "Switch to light" : "Switch to dark"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={(event) => {
+                event.preventDefault();
                 void signOut();
                 closeMobileNav();
               }}
@@ -589,15 +390,163 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button
-          className="w-full justify-start rounded-2xl"
-          variant="ghost"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-        >
-          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          {theme === "dark" ? "Switch to light" : "Switch to dark"}
-        </Button>
       </div>
+      <Dialog open={newWorkspaceOpen} onOpenChange={setNewWorkspaceOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create new workspace</DialogTitle>
+            <DialogDescription>
+              Add another workspace to this account and switch into it right away.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Input
+              value={workspaceName}
+              onChange={(event) => setWorkspaceName(event.target.value)}
+              placeholder="Marketing agent workspace"
+              disabled={isCreatingWorkspace}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && workspaceName.trim() && !isCreatingWorkspace) {
+                  event.preventDefault();
+                  void (async () => {
+                    try {
+                      setIsCreatingWorkspace(true);
+                      const result = await createCloudWorkspace(workspaceName.trim());
+                      await fetch("/api/cloud/active-project", {
+                        method: "POST",
+                        headers: {
+                          "content-type": "application/json",
+                        },
+                        body: JSON.stringify({ projectId: result.project.id }),
+                      });
+                      if (accessToken) {
+                        await reloadSidebarData(accessToken);
+                      }
+                      setWorkspaceName("");
+                      setNewWorkspaceOpen(false);
+                      router.push("/workspace");
+                      router.refresh();
+                      closeMobileNav();
+                      toast.success(`Workspace created: ${result.project.name}`);
+                    } catch (error) {
+                      toast.error(error instanceof Error ? error.message : "Could not create workspace");
+                    } finally {
+                      setIsCreatingWorkspace(false);
+                    }
+                  })();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setNewWorkspaceOpen(false)}
+              disabled={isCreatingWorkspace}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={!workspaceName.trim() || isCreatingWorkspace}
+              onClick={async () => {
+                try {
+                  setIsCreatingWorkspace(true);
+                  const result = await createCloudWorkspace(workspaceName.trim());
+                  await fetch("/api/cloud/active-project", {
+                    method: "POST",
+                    headers: {
+                      "content-type": "application/json",
+                    },
+                    body: JSON.stringify({ projectId: result.project.id }),
+                  });
+                  if (accessToken) {
+                    await reloadSidebarData(accessToken);
+                  }
+                  setWorkspaceName("");
+                  setNewWorkspaceOpen(false);
+                  router.push("/workspace");
+                  router.refresh();
+                  closeMobileNav();
+                  toast.success(`Workspace created: ${result.project.name}`);
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "Could not create workspace");
+                } finally {
+                  setIsCreatingWorkspace(false);
+                }
+              }}
+            >
+              {isCreatingWorkspace ? "Creating..." : "Create workspace"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={upgradeOpen} onOpenChange={setUpgradeOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Upgrade to create more workspaces</DialogTitle>
+            <DialogDescription>
+              Free includes one workspace. Upgrade to Pro or Scale to add more and keep billing in this account.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="rounded-2xl border p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-medium">Pro</div>
+                  <div className="text-sm text-muted-foreground">Multiple workspaces, longer retention, email support.</div>
+                </div>
+                <div className="text-sm font-medium">$29/mo</div>
+              </div>
+              <Button
+                type="button"
+                className="mt-4 w-full"
+                disabled={checkoutPlan !== null}
+                onClick={async () => {
+                  try {
+                    setCheckoutPlan("pro");
+                    const result = await createPlanCheckout("pro");
+                    window.location.href = result.url;
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : "Could not open Pro checkout");
+                    setCheckoutPlan(null);
+                  }
+                }}
+              >
+                {checkoutPlan === "pro" ? "Opening checkout..." : "Choose Pro"}
+              </Button>
+            </div>
+            <div className="rounded-2xl border p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-medium">Scale</div>
+                  <div className="text-sm text-muted-foreground">Higher volume, 1-year retention, priority support.</div>
+                </div>
+                <div className="text-sm font-medium">$99/mo</div>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-4 w-full"
+                disabled={checkoutPlan !== null}
+                onClick={async () => {
+                  try {
+                    setCheckoutPlan("scale");
+                    const result = await createPlanCheckout("scale");
+                    window.location.href = result.url;
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : "Could not open Scale checkout");
+                    setCheckoutPlan(null);
+                  }
+                }}
+              >
+                {checkoutPlan === "scale" ? "Opening checkout..." : "Choose Scale"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </aside>
   );
 }

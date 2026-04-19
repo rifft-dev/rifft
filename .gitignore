@@ -9,6 +9,8 @@ coverage
 __pycache__
 *.pyc
 .pytest_cache
+.egg-info
+.eggs
 .venv
 .DS_Store
 

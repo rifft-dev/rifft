@@ -1,11 +1,12 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import Fastify from "fastify";
+import Stripe from "stripe";
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
 import { closePools, pgPool } from "./db.js";
 import { getBearerToken, getSupabaseAdminClient, isSupabaseConfigured } from "./supabase.js";
 import {
   bootstrapCloudProject,
+  createCloudWorkspaceForUser,
   createProject,
   getAccessibleProject,
   getProject,
@@ -15,7 +16,7 @@ import {
   getCloudProjectUsageSummary,
   getProjectBaseline,
   getProjectInsights,
-  syncPolarSubscription,
+  syncStripeSubscription,
   getTraceProjectId,
   listForkDrafts,
   listProjectsForUser,
@@ -23,16 +24,17 @@ import {
   getTraceComparison,
   getTraceGraph,
   getTraceTimeline,
-  listProjects,
   listTraces,
   setProjectBaseline,
   upsertForkDraft,
   updateProjectSettings,
+  deleteProject,
   listProjectMembers,
   addProjectMember,
   removeProjectMember,
   getAlertCandidatesForTrace,
   consumePendingInvites,
+  isPrimaryWorkspace,
 } from "./queries.js";
 
 const port = Number(process.env.PORT ?? 4000);
@@ -103,58 +105,6 @@ const canAccessTrace = async (user: AuthenticatedUser | null, traceId: string) =
   return Boolean(accessibleProject);
 };
 
-const safeEqual = (left: string, right: string) => {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-  if (leftBuffer.length !== rightBuffer.length) {
-    return false;
-  }
-
-  return timingSafeEqual(leftBuffer, rightBuffer);
-};
-
-const verifyPolarWebhookSignature = (request: FastifyRequest & { rawBody?: string }) => {
-  const secret = process.env.POLAR_WEBHOOK_SECRET;
-  if (!secret) {
-    return false;
-  }
-
-  const body = request.rawBody ?? "";
-  const webhookId = request.headers["webhook-id"];
-  const webhookTimestamp = request.headers["webhook-timestamp"];
-  const webhookSignature = request.headers["webhook-signature"];
-
-  if (
-    typeof webhookId !== "string" ||
-    typeof webhookTimestamp !== "string" ||
-    typeof webhookSignature !== "string"
-  ) {
-    return false;
-  }
-
-  const signedContent = `${webhookId}.${webhookTimestamp}.${body}`;
-  const expected = createHmac("sha256", secret).update(signedContent).digest("base64");
-  const candidates = webhookSignature
-    .split(" ")
-    .flatMap((entry) => entry.split(","))
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => {
-      if (entry.startsWith("v1,")) {
-        return entry.slice(3);
-      }
-      if (entry.startsWith("v1=")) {
-        return entry.slice(3);
-      }
-      if (entry.startsWith("v1")) {
-        return entry.slice(2).replace(/^[=,]/, "");
-      }
-      return entry;
-    });
-
-  return candidates.some((candidate) => safeEqual(candidate, expected));
-};
-
 app.get("/health", async () => ({
   status: "ok",
   service: "api",
@@ -165,42 +115,64 @@ app.get("/health", async () => ({
   },
 }));
 
-app.post("/webhooks/polar", async (request, reply) => {
-  const typedRequest = request as FastifyRequest & { rawBody?: string };
-  if (!verifyPolarWebhookSignature(typedRequest)) {
-    reply.code(401);
+app.post("/webhooks/stripe", async (request, reply) => {
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  if (!stripeSecretKey || !webhookSecret) {
+    reply.code(500);
+    return { error: "stripe_not_configured" };
+  }
+
+  const sig = request.headers["stripe-signature"];
+  if (typeof sig !== "string") {
+    reply.code(400);
+    return { error: "missing_signature" };
+  }
+
+  const stripe = new Stripe(stripeSecretKey);
+  let event: Stripe.Event;
+
+  try {
+    const rawBody = (request as FastifyRequest & { rawBody?: string }).rawBody ?? JSON.stringify(request.body);
+    event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
+  } catch {
+    reply.code(400);
     return { error: "invalid_signature" };
   }
 
-  const body = request.body as Record<string, unknown> | null;
-  const eventType =
-    (body && typeof body.type === "string" ? body.type : null) ??
-    (body && typeof body.event === "string" ? body.event : null);
+  const relevantEvents = new Set([
+    "customer.subscription.created",
+    "customer.subscription.updated",
+    "customer.subscription.deleted",
+    "customer.subscription.paused",
+    "customer.subscription.resumed",
+  ]);
 
-  if (!body || !eventType) {
-    reply.code(400);
-    return { error: "invalid_event" };
-  }
-
-  if (!eventType.startsWith("subscription.")) {
+  if (!relevantEvents.has(event.type)) {
     return { received: true, ignored: true };
   }
 
-  const payload =
-    body.data && typeof body.data === "object" && !Array.isArray(body.data)
-      ? (body.data as Record<string, unknown>)
-      : body;
-
-  const result = await syncPolarSubscription(eventType, payload);
-  return {
-    received: true,
-    ...result,
+  const subscription = event.data.object as Stripe.Subscription & {
+    customer: string;
+    current_period_start: number;
+    current_period_end: number;
   };
+  const result = await syncStripeSubscription(event.type, subscription);
+  return { received: true, ...result };
 });
 
-app.get("/projects", async () => ({
-  projects: await listProjects(),
-}));
+app.get("/projects", async (request, reply) => {
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (!user) {
+    reply.code(401);
+    return { error: "unauthorized" };
+  }
+
+  return {
+    projects: await listProjectsForUser(user.id),
+  };
+});
 
 app.get("/cloud/me", async (request, reply) => {
   const user = await getAuthenticatedUser(request.headers.authorization);
@@ -228,6 +200,94 @@ app.get("/cloud/projects", async (request, reply) => {
   };
 });
 
+app.post("/cloud/projects", async (request, reply) => {
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (!user) {
+    reply.code(401);
+    return { error: "unauthorized" };
+  }
+
+  const bodySchema = z.object({
+    name: z.string().trim().min(1).max(100),
+    current_project_id: z.string().trim().min(1).optional(),
+  });
+  const parsed = bodySchema.safeParse(request.body);
+  if (!parsed.success) {
+    reply.code(400);
+    return {
+      error: "invalid_request",
+      message: parsed.error.message,
+    };
+  }
+
+  try {
+    const project = await createCloudWorkspaceForUser({
+      userId: user.id,
+      email: user.email,
+      name: parsed.data.name,
+      currentProjectId: parsed.data.current_project_id ?? null,
+    });
+    reply.code(201);
+    return { project };
+  } catch (error) {
+    if (error instanceof Error && error.message === "forbidden") {
+      reply.code(403);
+      return { error: "forbidden" };
+    }
+    if (error instanceof Error && error.message === "missing_account") {
+      reply.code(400);
+      return { error: "missing_account" };
+    }
+    if (error instanceof Error && error.message === "invalid_name") {
+      reply.code(400);
+      return { error: "invalid_name" };
+    }
+    throw error;
+  }
+});
+
+app.post("/stripe/customer-portal", async (request, reply) => {
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (!user) {
+    reply.code(401);
+    return { error: "unauthorized" };
+  }
+
+  const body = request.body as { account_id?: string; return_url?: string };
+  if (!body.account_id) {
+    reply.code(400);
+    return { error: "missing_account_id" };
+  }
+
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    reply.code(500);
+    return { error: "stripe_not_configured" };
+  }
+
+  const sub = await pgPool.query<{ provider_customer_id: string }>(
+    `SELECT provider_customer_id FROM subscriptions
+     WHERE account_id = $1 AND provider = 'stripe'
+     AND status IN ('active', 'trialing', 'past_due')
+     ORDER BY updated_at DESC LIMIT 1`,
+    [body.account_id],
+  );
+
+  const customerId = sub.rows[0]?.provider_customer_id;
+  if (!customerId) {
+    reply.code(404);
+    return { error: "no_stripe_customer" };
+  }
+
+  const stripe = new Stripe(stripeSecretKey);
+  const session = await stripe.billingPortal.sessions.create({
+    customer: customerId,
+    return_url: body.return_url ?? `${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.rifft.dev"}/settings`,
+  });
+
+  return { url: session.url };
+});
+
 app.get("/projects/:id", async (request, reply) => {
   const projectId = (request.params as { id: string }).id;
   const user = await getAuthenticatedUser(request.headers.authorization);
@@ -243,7 +303,10 @@ app.get("/projects/:id", async (request, reply) => {
     return { error: "not_found" };
   }
 
-  return project;
+  return {
+    ...project,
+    is_primary_workspace: await isPrimaryWorkspace(projectId),
+  };
 });
 
 app.post("/projects", async (request, reply) => {
@@ -278,11 +341,12 @@ app.post("/cloud/bootstrap", async (request, reply) => {
     name: user.name,
   });
 
+  let activeProjectId = project.id;
   if (user.email) {
-    await consumePendingInvites(user.id, user.email);
+    activeProjectId = (await consumePendingInvites(user.id, user.email)) ?? project.id;
   }
 
-  return { project };
+  return { project, active_project_id: activeProjectId };
 });
 
 app.patch("/projects/:id", async (request, reply) => {
@@ -328,6 +392,41 @@ app.patch("/projects/:id", async (request, reply) => {
   }
 
   return project;
+});
+
+app.delete("/projects/:id", async (request, reply) => {
+  const projectId = (request.params as { id: string }).id;
+  const user = await getAuthenticatedUser(request.headers.authorization);
+
+  if (user) {
+    const accessibleProject = await getAccessibleProject(user.id, projectId);
+    if (!accessibleProject) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+    if (!accessibleProject.permissions.can_update_settings) {
+      reply.code(403);
+      return { error: "forbidden" };
+    }
+  } else {
+    const project = await getProject(projectId);
+    if (project?.account_id) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+    if (!project) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+  }
+
+  if (await isPrimaryWorkspace(projectId)) {
+    reply.code(409);
+    return { error: "primary_workspace_protected" };
+  }
+
+  await deleteProject(projectId);
+  return { ok: true };
 });
 
 app.post("/projects/:id/regenerate-api-key", async (request, reply) => {
@@ -547,11 +646,10 @@ app.get("/traces/:traceId/live", async (request, reply) => {
     return { error: "not_found" };
   }
 
-  const [trace, graph, timeline] = await Promise.all([
-    getTrace(traceId),
-    getTraceGraph(traceId),
-    getTraceTimeline(traceId),
-  ]);
+  const trace = await getTrace(traceId);
+  const [graph, timeline] = trace
+    ? await Promise.all([getTraceGraph(traceId, trace), getTraceTimeline(traceId, trace)])
+    : [null, null];
 
   if (!trace || !graph || !timeline) {
     reply.code(404);
@@ -731,6 +829,66 @@ const dispatchFatalFailureAlert = async (traceId: string) => {
   }
 };
 
+// Fires when a completed trace exceeds the project's cost or timeout thresholds.
+const dispatchThresholdAlert = async (traceId: string) => {
+  const alertWebhookUrl = process.env.ALERT_WEBHOOK_URL;
+  if (!alertWebhookUrl) {
+    return;
+  }
+
+  const trace = await getTrace(traceId);
+  if (!trace) {
+    return;
+  }
+
+  const project = await getProject(trace.project_id);
+  if (!project) {
+    return;
+  }
+
+  const violations: Array<{ type: string; value: number; threshold: number }> = [];
+
+  if (project.cost_threshold_usd > 0 && trace.total_cost_usd > project.cost_threshold_usd) {
+    violations.push({
+      type: "cost_exceeded",
+      value: trace.total_cost_usd,
+      threshold: project.cost_threshold_usd,
+    });
+  }
+
+  if (project.timeout_threshold_ms > 0 && trace.duration_ms > project.timeout_threshold_ms) {
+    violations.push({
+      type: "timeout_exceeded",
+      value: trace.duration_ms,
+      threshold: project.timeout_threshold_ms,
+    });
+  }
+
+  if (violations.length === 0) {
+    return;
+  }
+
+  const payload = {
+    event: "trace.threshold_exceeded",
+    trace_id: traceId,
+    project_id: trace.project_id,
+    project_name: project.name,
+    started_at: trace.started_at,
+    total_cost_usd: trace.total_cost_usd,
+    duration_ms: trace.duration_ms,
+    violations,
+    trace_url: `${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.rifft.dev"}/traces/${traceId}`,
+  };
+
+  await fetch(alertWebhookUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  }).catch((error) => {
+    app.log.warn({ error, traceId }, "Threshold alert webhook dispatch failed");
+  });
+};
+
 app.post("/internal/traces/:traceId/alert", async (request, reply) => {
   const internalSecret = process.env.INTERNAL_API_SECRET;
   if (internalSecret) {
@@ -742,7 +900,10 @@ app.post("/internal/traces/:traceId/alert", async (request, reply) => {
   }
 
   const traceId = (request.params as { traceId: string }).traceId;
-  await dispatchFatalFailureAlert(traceId);
+  await Promise.all([
+    dispatchFatalFailureAlert(traceId),
+    dispatchThresholdAlert(traceId),
+  ]);
   return { ok: true };
 });
 
@@ -847,11 +1008,8 @@ app.delete("/projects/:id/members", async (request, reply) => {
 process.on("SIGINT", () => void closePools());
 process.on("SIGTERM", () => void closePools());
 
-if (
-  (process.env.POLAR_ACCESS_TOKEN || process.env.POLAR_PRO_PRODUCT_ID) &&
-  !process.env.POLAR_WEBHOOK_SECRET
-) {
-  throw new Error("POLAR_WEBHOOK_SECRET must be set when Polar billing is enabled");
+if (process.env.STRIPE_SECRET_KEY && !process.env.STRIPE_WEBHOOK_SECRET) {
+  throw new Error("STRIPE_WEBHOOK_SECRET must be set when Stripe billing is enabled");
 }
 
 app.listen({ host: "0.0.0.0", port }).catch((error) => {

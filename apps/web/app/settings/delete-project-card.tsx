@@ -34,37 +34,62 @@ export function DeleteProjectCard({ projectId, projectName }: DeleteProjectCardP
     });
 
     if (!response.ok) {
-      toast.error("Could not delete project");
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      toast.error(
+        data.error === "primary_workspace_protected"
+          ? "The main workspace can't be deleted."
+          : "Could not delete workspace",
+      );
       return;
     }
 
     toast.success(
-      projectId === "default"
-        ? "Project cleared and reset to a fresh default workspace"
-        : "Project deleted",
+      "Workspace deleted",
     );
     setOpen(false);
     setConfirmation("");
+
+    const currentProjectResponse = await fetch("/api/cloud/current-project", {
+      cache: "no-store",
+    });
+    const nextProjectId = currentProjectResponse.ok
+      ? ((await currentProjectResponse.json()) as { projectId?: string | null }).projectId ?? null
+      : null;
+
+    if (nextProjectId) {
+      await fetch("/api/cloud/active-project", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ projectId: nextProjectId }),
+      }).catch(() => undefined);
+    }
+
     startTransition(() => {
       router.refresh();
-      router.push("/settings");
+      router.push(nextProjectId ? "/workspace" : "/settings");
     });
   };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="destructive" type="button">
-          Delete project
+        <Button
+          variant="destructive"
+          size="sm"
+          type="button"
+          className="h-8 rounded-full px-3 text-xs"
+        >
+          Delete
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Delete {projectName}?</DialogTitle>
           <DialogDescription>
-            This removes the project, its traces, and any saved fork drafts. Because this app uses a
-            single active workspace today, deleting the default project will immediately create a new
-            empty default project so the UI can stay usable.
+            This removes the workspace, its traces, and any saved fork drafts. The main workspace for
+            the account is protected and can't be deleted.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-2">
@@ -88,7 +113,7 @@ export function DeleteProjectCard({ projectId, projectName }: DeleteProjectCardP
             disabled={!canDelete || isPending}
             onClick={handleDelete}
           >
-            {isPending ? "Deleting..." : "Delete project"}
+            {isPending ? "Deleting..." : "Delete workspace"}
           </Button>
         </DialogFooter>
       </DialogContent>

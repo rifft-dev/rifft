@@ -34,12 +34,22 @@ export const resolveActiveProject = async (): Promise<ActiveProjectResolution> =
     };
   }
 
-  const response = await fetch(`${apiBaseUrl}/cloud/projects`, {
-    cache: "no-store",
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${apiBaseUrl}/cloud/projects`, {
+      cache: "no-store",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+      },
+    });
+  } catch {
+    return {
+      projectId: preferredProjectId ?? "default",
+      preferredProjectId,
+      repaired: false,
+      hasCloudProjects: false,
+    };
+  }
 
   if (!response.ok) {
     return {

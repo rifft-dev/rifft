@@ -21,7 +21,7 @@ Anything not required for that flow should be treated as out of scope for the MV
 Rifft will have three visible paths:
 
 - Self-hosted: free forever
-- Cloud Free: `10K spans/month`, `7-day retention`
+- Cloud Free: `50K spans/month`, `14-day retention`
 - Cloud Pro: `$29/month`, `500K spans/month`, `90-day retention`, `$5 per 100K` spans above `500K`
 
 Initial cloud positioning:
@@ -248,8 +248,8 @@ without forcing a schema rewrite.
 
 ### Cloud Free
 
-- `10K spans/month`
-- `7-day retention`
+- `50K spans/month`
+- `14-day retention`
 - all core hosted debugging features
 - community support
 
@@ -331,7 +331,7 @@ Use ingested spans as the only billing unit for MVP cloud pricing.
 - count spans per project per calendar billing month
 - expose current month usage in the app
 - warn users as they approach limits
-- hard-stop or soft-stop Free when usage exceeds `10K`
+- hard-stop or soft-stop Free when usage exceeds `50K`
 - keep Pro ingest active and accumulate overage usage
 
 ### Recommendation

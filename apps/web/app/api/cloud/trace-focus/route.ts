@@ -6,6 +6,7 @@ const apiBaseUrl =
 
 type TraceDetailResponse = {
   trace_id: string;
+  root_span_name: string | null;
   started_at: string;
   duration_ms: number;
   status: "ok" | "error" | "unset";
@@ -44,12 +45,13 @@ export async function GET(request: NextRequest) {
   const primaryFailure = trace.mast_failures[0] ?? null;
 
   return NextResponse.json({
-    trace_id: trace.trace_id,
-    started_at: trace.started_at,
-    duration_ms: trace.duration_ms,
-    status: trace.status,
-    primary_failure: primaryFailure,
-    root_cause_agent_id: trace.causal_attribution.root_cause_agent_id,
-    failing_agent_id: trace.causal_attribution.failing_agent_id,
-  });
+  trace_id: trace.trace_id,
+  root_span_name: trace.root_span_name ?? null,
+  started_at: trace.started_at,
+  duration_ms: trace.duration_ms,
+  status: trace.status,
+  primary_failure: primaryFailure,
+  root_cause_agent_id: trace.causal_attribution.root_cause_agent_id,
+  failing_agent_id: trace.causal_attribution.failing_agent_id,
+});
 }

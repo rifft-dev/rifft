@@ -15,9 +15,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getMastMeta } from "@/lib/mast";
-import { getTraceToneCard, getTraceToneLabels } from "@/lib/utils";
-import { getProjectBaseline, getProjectInsights, getProjectUsageSummary, getTraceComparison, getTraces } from "../lib/api";
-import { redirectToBootstrap, requireCloudProject } from "../lib/require-cloud-project";
+import { getTraceDisplayName, getTraceToneCard, getTraceToneLabels } from "@/lib/utils";
+import {
+  getProjectBaseline,
+  getProjectInsights,
+  getProjectSettings,
+  getProjectUsageSummary,
+  getTraceComparison,
+  getTraces,
+} from "../lib/api";
+import { requireCloudProject } from "../lib/require-cloud-project";
 
 const formatSpanCount = (value: number) => new Intl.NumberFormat("en-US").format(value);
 const formatPercentage = (value: number) => `${Math.round(value * 100)}%`;
@@ -39,12 +46,18 @@ const formatRelative = (value: string) => {
 
 export default async function WorkspacePage() {
   await requireCloudProject("/workspace");
-  const [usageSummary, traceData, insightSummary, baselineResponse] = await Promise.all([
+  const [usageSummary, traceData, insightSummary, baselineResponse, projectSettings] = await Promise.all([
     getProjectUsageSummary(),
     getTraces(),
-    getProjectInsights(),
-    getProjectBaseline(),
-  ]).catch(() => redirectToBootstrap("/workspace"));
+    getProjectInsights().catch(() => ({
+      recent_trace_window: 20,
+      insights: [],
+    })),
+    getProjectBaseline().catch(() => ({
+      baseline: null,
+    })),
+    getProjectSettings(),
+  ]);
   const traces = traceData.traces;
   const topInsights = insightSummary.insights.slice(0, 3);
   const latestFailingTrace =
@@ -62,9 +75,38 @@ export default async function WorkspacePage() {
     latestFailingTrace && baseline && baseline.trace_id !== latestFailingTrace.trace_id
       ? (await getTraceComparison(latestFailingTrace.trace_id)).comparison
       : null;
+  const hasNoTraces = traces.length === 0;
 
   return (
     <div className="space-y-8 px-6 py-8 lg:px-8">
+      {hasNoTraces ? (
+        <section className="rounded-[2rem] border bg-[radial-gradient(circle_at_top_left,hsl(var(--chart-1))/0.12,transparent_28%),hsl(var(--card))] p-8 shadow-sm">
+          <div className="max-w-3xl space-y-5">
+            <Badge variant="outline">Workspace</Badge>
+            <h1 className="text-4xl font-semibold tracking-tight lg:text-5xl">
+              Waiting for your first trace.
+            </h1>
+            <p className="text-lg text-muted-foreground">
+              {projectSettings.permissions.can_rotate_api_keys
+                ? "Your hosted project is ready, but nothing has landed yet. The fastest next step is to run one instrumented workflow and let onboarding open the first trace automatically."
+                : "Your team is setting up this workspace. Traces will appear here as instrumented runs come in."}
+            </p>
+            {projectSettings.permissions.can_rotate_api_keys ? (
+              <div className="flex flex-wrap gap-3">
+                <Button asChild>
+                  <Link href="/onboarding">
+                    Go to first-trace setup
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
+                </Button>
+                <Button asChild variant="outline">
+                  <Link href="/settings">Copy project credentials</Link>
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
       <section className="section-fade overflow-hidden rounded-[2rem] border bg-[radial-gradient(circle_at_top_left,hsl(var(--destructive))/0.14,transparent_28%),radial-gradient(circle_at_top_right,hsl(var(--chart-1))/0.14,transparent_30%),hsl(var(--card))] p-8 shadow-sm">
         <div className="grid gap-8 xl:grid-cols-[1.2fr_0.8fr]">
           <div className="space-y-5">
@@ -104,7 +146,7 @@ export default async function WorkspacePage() {
               {latestFailingTrace ? (
                 <>
                   <div className="mt-3 font-mono text-sm">
-                    {latestFailingTrace.trace_id.slice(0, 18)}...
+                    {getTraceDisplayName(latestFailingTrace)}
                   </div>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <span
@@ -151,7 +193,7 @@ export default async function WorkspacePage() {
                 <div
                   className={`rounded-2xl border p-4 ${nextTraceToneCard ?? "border-destructive/20 bg-destructive/5"}`}
                 >
-                  <div className="font-mono text-sm">{latestFailingTrace.trace_id}</div>
+                  <div className="font-mono text-sm">{getTraceDisplayName(latestFailingTrace)}</div>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <Badge variant="destructive">{latestFailingTrace.status}</Badge>
                     <span
@@ -222,7 +264,7 @@ export default async function WorkspacePage() {
                   className={`rounded-2xl border p-4 ${healthyTraceToneCard ?? "bg-muted/20"}`}
                 >
                   <div className="font-mono text-sm">
-                    {recentHealthyTrace.trace_id.slice(0, 18)}...
+                    {getTraceDisplayName(recentHealthyTrace)}
                   </div>
                   <div className="mt-2">
                     <span
@@ -264,7 +306,9 @@ export default async function WorkspacePage() {
                   <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
                     Current baseline
                   </div>
-                  <div className="font-mono text-sm">{baseline.trace_id}</div>
+                  <div className="text-sm font-medium">
+  {baseline.trace_id}
+</div>
                   <div className="flex flex-wrap gap-2">
                     <Badge variant={baseline.trace_status === "error" ? "destructive" : "secondary"}>
                       {baseline.trace_status ?? "unknown"}
@@ -379,12 +423,18 @@ export default async function WorkspacePage() {
               ) : (
                 <div className="space-y-3">
                   <div className="text-sm text-muted-foreground">
-                    Once you have both a baseline and a newer incident, Rifft will show whether the
-                    latest change improved failure rate, shifted the root cause, or introduced new
-                    failure modes.
+                    {!baseline
+                      ? "Set a baseline first, then Rifft will compare newer incidents against it here."
+                      : !latestFailingTrace
+                        ? "You have a baseline, but there is no newer incident to compare against it yet."
+                        : baseline.trace_id === latestFailingTrace.trace_id
+                          ? "Your latest incident is also the current baseline. Mark another healthy run as baseline or wait for a newer incident to compare."
+                          : "Rifft has a baseline and a recent incident, but comparison data isn't available for this pair yet."}
                   </div>
                   <Button asChild variant="outline">
-                    <Link href="/traces">Go to incident queue</Link>
+                    <Link href={baseline ? "/traces" : recentHealthyTrace ? `/traces/${recentHealthyTrace.trace_id}` : "/traces"}>
+                      {baseline ? "Go to incident queue" : recentHealthyTrace ? "Open healthy trace to baseline" : "Go to traces"}
+                    </Link>
                   </Button>
                 </div>
               )}
@@ -561,7 +611,12 @@ export default async function WorkspacePage() {
                 className={`surface-lift flex flex-col gap-3 rounded-2xl border p-4 transition-colors hover:bg-muted/30 lg:flex-row lg:items-center lg:justify-between ${getTraceToneCard(trace)}`}
               >
                 <div className="space-y-2">
-                  <div className="font-mono text-sm">{trace.trace_id}</div>
+                  <div className="text-sm font-medium">
+  {getTraceDisplayName(trace)}
+</div>
+{trace.root_span_name ? (
+  <div className="font-mono text-xs text-muted-foreground">{trace.trace_id.slice(0, 8)}…</div>
+) : null}
                   <div className="flex flex-wrap gap-2">
                     <Badge variant={trace.status === "error" ? "destructive" : "secondary"}>
                       {trace.status}

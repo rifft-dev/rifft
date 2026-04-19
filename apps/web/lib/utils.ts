@@ -13,6 +13,24 @@ export const formatCurrency = (value: number) =>
     maximumFractionDigits: 4,
   }).format(value);
 
+export const formatDuration = (valueMs: number) => {
+  if (valueMs < 1000) {
+    return `${valueMs}ms`;
+  }
+
+  const seconds = valueMs / 1000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.round(seconds % 60);
+  return `${minutes}m ${remainingSeconds}s`;
+};
+
+export const getTraceDisplayName = (trace: { root_span_name: string | null; trace_id: string }) =>
+  trace.root_span_name?.trim() || trace.trace_id;
+
 type TraceToneInput = {
   status: "ok" | "error" | "unset";
   mast_failures: Array<{ severity: "benign" | "fatal"; mode: string }>;

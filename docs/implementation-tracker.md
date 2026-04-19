@@ -314,7 +314,7 @@ Status keys:
 5. Add critical path, A2A, and AG-UI support.
 6. Finish README, docs, clean-machine quickstart testing, browser QA, and performance validation.
 
-Free10K/month $0
+Free50K/month $0
 Pro500K/month$29/month 
 Team2M/month$99/month
 EnterpriseUnlimited$500+/month

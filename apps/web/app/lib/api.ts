@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { resolveActiveProjectId } from "@/lib/cloud-context";
 export type {
   AgentDetail,
+  CloudProjectSummary,
   ForkDraft,
   ProjectInsightsSummary,
   TraceBaseline,
@@ -16,6 +17,7 @@ export type {
 } from "./api-types";
 import type {
   AgentDetail,
+  CloudProjectSummary,
   ForkDraft,
   ProjectInsightsSummary,
   TraceBaseline,
@@ -57,6 +59,9 @@ export const getProjectSettings = async () => {
   return fetchJson<ProjectSettings>(`/projects/${projectId}`);
 };
 
+export const getCloudProjects = async () =>
+  fetchJson<{ projects: CloudProjectSummary[] }>(`/cloud/projects`);
+
 export const getProjectUsageSummary = async () => {
   const projectId = await resolveActiveProjectId();
   return fetchJson<ProjectUsageSummary>(`/projects/${projectId}/usage`);
@@ -72,14 +77,24 @@ export const getProjectBaseline = async () => {
   return fetchJson<{ baseline: TraceBaseline | null }>(`/projects/${projectId}/baseline`);
 };
 
-export const getTraces = async () => {
+export const getTraces = async (options?: { page?: number; pageSize?: number }) => {
   const projectId = await resolveActiveProjectId();
+  const searchParams = new URLSearchParams();
+  if (options?.page) {
+    searchParams.set("page", String(options.page));
+  }
+  if (options?.pageSize) {
+    searchParams.set("page_size", String(options.pageSize));
+  }
+  const suffix = searchParams.toString().length > 0 ? `?${searchParams.toString()}` : "";
   return fetchJson<{ traces: TraceSummary[]; total: number; page: number }>(
-    `/projects/${projectId}/traces`,
+    `/projects/${projectId}/traces${suffix}`,
   );
 };
 
 export const getTraceDetail = (traceId: string) => fetchJson<TraceDetail>(`/traces/${traceId}`);
+export const getTraceSnapshot = (traceId: string) =>
+  fetchJson<TraceLiveSnapshot>(`/traces/${traceId}/live`);
 export const getTraceComparison = (traceId: string) =>
   fetchJson<{ comparison: TraceComparison | null }>(`/traces/${traceId}/comparison`);
 export const getTraceGraph = (traceId: string) => fetchJson<TraceGraph>(`/traces/${traceId}/graph`);

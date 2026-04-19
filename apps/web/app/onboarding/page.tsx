@@ -7,12 +7,14 @@ import { planIntentCookieName } from "@/lib/project-cookie";
 
 export default async function OnboardingPage() {
   await requireCloudProject("/onboarding");
-  const [project, traces] = await Promise.all([getProjectSettings(), getTraces()]).catch(() =>
-    redirectToBootstrap("/onboarding"),
-  );
+  const [project, traces] = await Promise.all([getProjectSettings(), getTraces()]);
   const ingestUrl = process.env.NEXT_PUBLIC_INGEST_URL ?? "https://ingest.rifft.dev";
   const planIntent = (await cookies()).get(planIntentCookieName)?.value ?? null;
   const onboardingStartedAt = new Date().toISOString();
+
+  if (!project.permissions.can_rotate_api_keys) {
+    redirect("/traces");
+  }
 
   if (traces.traces[0]?.trace_id) {
     redirect(`/traces/${traces.traces[0].trace_id}`);

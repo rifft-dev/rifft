@@ -63,6 +63,13 @@ type Props = {
   initialForkDrafts: ForkDraft[];
 };
 
+type LiveState = {
+  isLive: boolean;
+  lastActivityAt: string;
+  isRefreshing: boolean;
+  sessionExpired?: boolean;
+};
+
 type AgentNodeData = TraceGraph["nodes"][number] & { mastFailureCount: number };
 
 const GRAPH_NODE_WIDTH = 220;
@@ -74,8 +81,19 @@ const chartConfig = {
   duration: { label: "Duration", color: "hsl(var(--chart-1))" },
 } satisfies ChartConfig;
 
+const MAX_JSON_PREVIEW_CHARS = 12_000;
+
 const formatJson = (value: unknown) =>
   typeof value === "string" ? value : JSON.stringify(value, null, 2);
+
+const formatJsonPreview = (value: unknown) => {
+  const formatted = formatJson(value);
+  if (formatted.length <= MAX_JSON_PREVIEW_CHARS) {
+    return formatted;
+  }
+
+  return `${formatted.slice(0, MAX_JSON_PREVIEW_CHARS)}\n\n… truncated for preview`;
+};
 
 const statusVariant = (status: string) => {
   if (status === "error") return "destructive" as const;
@@ -220,7 +238,8 @@ export function InteractiveTraceDetail({
   const [graph, setGraph] = useState<TraceGraph>(initialGraph);
   const [timeline, setTimeline] = useState<TraceTimeline>(initialTimeline);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(initialGraph.nodes[0]?.id ?? null);
-  const [selectedSpanId, setSelectedSpanId] = useState<string | null>(initialGraph.communication_spans[0]?.span_id ?? null);
+  const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"graph" | "timeline">("graph");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [forkOpen, setForkOpen] = useState(false);
   const [messageOverlayOpen, setMessageOverlayOpen] = useState(false);
@@ -228,20 +247,22 @@ export function InteractiveTraceDetail({
   const [replayMode, setReplayMode] = useState(false);
   const [replayIndex, setReplayIndex] = useState(0);
   const [forkDrafts, setForkDrafts] = useState<ForkDraft[]>(initialForkDrafts);
-  const [liveState, setLiveState] = useState({
+const [forkSaved, setForkSaved] = useState(false);
+  const [liveState, setLiveState] = useState<LiveState>({
     isLive: initialTrace.status === "unset",
     lastActivityAt: initialTrace.updated_at,
     isRefreshing: false,
+    sessionExpired: false,
   });
   const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
   const overlayOpenedFromSheet = useRef(false);
+  const previousFailureCountRef = useRef(initialTrace.mast_failures.length);
 
   const agentById = useMemo(() => new Map(agentDetails.map((item) => [item.agentId, item.detail])), [agentDetails]);
   const selectedAgent = selectedAgentId ? agentById.get(selectedAgentId) ?? null : null;
-  const selectedMessage =
-    trace.communication_spans.find((span) => span.span_id === selectedSpanId) ??
-    trace.communication_spans[0] ??
-    null;
+  const selectedMessage = selectedSpanId
+    ? trace.communication_spans.find((span) => span.span_id === selectedSpanId) ?? null
+    : null;
   const selectedDraft = selectedMessage
     ? forkDrafts.find((draft) => draft.span_id === selectedMessage.span_id) ?? null
     : null;
@@ -269,6 +290,10 @@ export function InteractiveTraceDetail({
     : [];
   const rootCauseAgent = trace.causal_attribution.root_cause_agent_id ?? "Not inferred";
   const failingAgent = trace.causal_attribution.failing_agent_id ?? "Not inferred";
+  const hasIncidentContext = trace.mast_failures.length > 0 || trace.status === "error";
+  const causalExplanation =
+    trace.causal_attribution.explanation ??
+    "Rifft has not inferred a causal chain for this trace yet. You can still inspect spans, messages, and failures below.";
   const liveAgeMs = Date.now() - new Date(liveState.lastActivityAt).getTime();
   const liveStatusLabel =
     liveAgeMs < 5_000 ? "updated just now" : `${Math.max(1, Math.round(liveAgeMs / 1000))}s ago`;
@@ -288,6 +313,14 @@ export function InteractiveTraceDetail({
         });
 
         if (!response.ok) {
+          if (!cancelled) {
+            setLiveState((current) => ({
+              ...current,
+              isRefreshing: false,
+              isLive: response.status === 401 ? false : current.isLive,
+              sessionExpired: response.status === 401,
+            }));
+          }
           return;
         }
 
@@ -296,7 +329,6 @@ export function InteractiveTraceDetail({
           return;
         }
 
-        const previousFailureCount = trace.mast_failures.length;
         setTrace(snapshot.trace);
         setGraph(snapshot.graph);
         setTimeline(snapshot.timeline);
@@ -304,11 +336,13 @@ export function InteractiveTraceDetail({
           isLive: snapshot.live.is_live,
           lastActivityAt: snapshot.live.last_activity_at,
           isRefreshing: false,
+          sessionExpired: false,
         });
 
-        if (snapshot.trace.mast_failures.length > previousFailureCount) {
+        if (snapshot.trace.mast_failures.length > previousFailureCountRef.current) {
           toast.warning("New anomaly detected in the live trace.");
         }
+        previousFailureCountRef.current = snapshot.trace.mast_failures.length;
       } catch {
         if (!cancelled) {
           setLiveState((current) => ({ ...current, isRefreshing: false }));
@@ -330,6 +364,14 @@ export function InteractiveTraceDetail({
   const replaySpans = [...trace.communication_spans].sort(
     (left, right) => new Date(left.start_time).getTime() - new Date(right.start_time).getTime(),
   );
+  useEffect(() => {
+    if (replaySpans.length > 0) {
+      setReplayIndex((current) => Math.min(current, replaySpans.length - 1));
+      return;
+    }
+
+    setReplayIndex(0);
+  }, [replaySpans.length]);
   const replayProgressLabel =
     replaySpans.length > 0 ? `${Math.min(replayIndex + 1, replaySpans.length)} of ${replaySpans.length}` : "No replay path";
   const activeReplayIds = new Set(
@@ -412,21 +454,21 @@ export function InteractiveTraceDetail({
   };
 
   const saveFork = async () => {
-    if (!selectedMessage || !parsedForkPayload.valid) return;
+  if (!selectedMessage || !parsedForkPayload.valid) return;
 
-    try {
-      const draft = await persistForkDraft(
-        trace.trace_id,
-        selectedMessage.span_id,
-        parsedForkPayload.value,
-      );
-      setForkDrafts((current) => [draft, ...current.filter((item) => item.span_id !== draft.span_id)]);
-      setForkOpen(false);
-      toast.success("Fork draft saved");
-    } catch {
-      toast.error("Fork draft must be valid JSON");
-    }
-  };
+  try {
+    const draft = await persistForkDraft(
+      trace.trace_id,
+      selectedMessage.span_id,
+      parsedForkPayload.value,
+    );
+    setForkDrafts((current) => [draft, ...current.filter((item) => item.span_id !== draft.span_id)]);
+    setForkSaved(true);
+    toast.success("Fork draft saved");
+  } catch {
+    toast.error("Fork draft must be valid JSON");
+  }
+};
 
   const stepReplay = (direction: -1 | 1) => {
     if (replaySpans.length === 0) return;
@@ -443,39 +485,43 @@ export function InteractiveTraceDetail({
       <div className="space-y-6 px-6 py-6">
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_380px]">
           <div className="space-y-6">
-            <div className="section-fade grid gap-4 md:grid-cols-4">
-              <Card className="rounded-2xl border-destructive/20 bg-gradient-to-br from-destructive/8 to-transparent">
-                <CardHeader>
-                  <CardTitle className="text-sm text-muted-foreground">Root cause</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="font-mono text-sm font-semibold">{rootCauseAgent}</div>
-                  <Badge variant="destructive">{trace.mast_failures[0]?.mode ?? "No failure detected"}</Badge>
-                </CardContent>
-              </Card>
-              <Card className="rounded-2xl">
-                <CardHeader>
-                  <CardTitle className="text-sm text-muted-foreground">Failing agent</CardTitle>
-                </CardHeader>
-                <CardContent className="font-mono text-sm font-semibold">{failingAgent}</CardContent>
-              </Card>
+            <div className={`section-fade grid gap-4 ${hasIncidentContext ? "md:grid-cols-4" : "md:grid-cols-2"}`}>
+              {hasIncidentContext ? (
+                <>
+                  <Card className="rounded-2xl border-destructive/20 bg-gradient-to-br from-destructive/8 to-transparent">
+                    <CardHeader>
+                      <CardTitle className="text-sm text-muted-foreground">Root cause</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      <div className="font-mono text-sm font-semibold">{rootCauseAgent}</div>
+                      <Badge variant="destructive">{trace.mast_failures[0]?.mode ?? "Failure detected"}</Badge>
+                    </CardContent>
+                  </Card>
+                  <Card className="rounded-2xl">
+                    <CardHeader>
+                      <CardTitle className="text-sm text-muted-foreground">Failing agent</CardTitle>
+                    </CardHeader>
+                    <CardContent className="font-mono text-sm font-semibold">{failingAgent}</CardContent>
+                  </Card>
+                </>
+              ) : null}
               <Card
                 className={`rounded-2xl transition-colors ${trace.communication_spans.length > 0 ? "cursor-pointer hover:border-primary/40 hover:bg-muted/30" : ""}`}
                 onClick={() => {
                   if (trace.communication_spans.length > 0) {
                     setReplayMode(true);
-                    document.getElementById("trace-graph-tab")?.click();
+                    setActiveTab("graph");
                   }
                 }}
               >
                 <CardHeader>
-                  <CardTitle className="text-sm text-muted-foreground">Replay path</CardTitle>
+                  <CardTitle className="text-sm text-muted-foreground">Handoff path</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
                   <div className="text-2xl font-semibold">{trace.communication_spans.length}</div>
                   <div className="text-xs text-muted-foreground">
                     {trace.communication_spans.length > 0
-                      ? "steps · click to start replay"
+                      ? "saved handoff steps · click to step through"
                       : "communication steps captured"}
                   </div>
                 </CardContent>
@@ -495,16 +541,14 @@ export function InteractiveTraceDetail({
                     <Badge variant={liveState.isLive ? "default" : "outline"}>
                       {liveState.isLive ? "Live trace" : "Snapshot"}
                     </Badge>
-                    <Badge variant="outline">Last activity {liveStatusLabel}</Badge>
-                    {liveState.isRefreshing ? (
-                      <Badge variant="outline">
-                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                        Refreshing
-                      </Badge>
-                    ) : null}
+                   {!liveState.isLive || liveAgeMs >= 10_000 ? (
+  <Badge variant="outline">Last activity {liveStatusLabel}</Badge>
+) : null}
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    {liveState.isLive
+                    {liveState.sessionExpired
+                      ? "Your session expired while this trace was live. Refresh the page to resume live updates."
+                      : liveState.isLive
                       ? "Rifft is still receiving spans for this run. The graph, timeline, and anomaly state refresh automatically while it stays active."
                       : "This trace is no longer receiving new spans. You are looking at the latest stored snapshot."}
                   </p>
@@ -523,11 +567,11 @@ export function InteractiveTraceDetail({
               </CardContent>
             </Card>
 
-            <Tabs defaultValue="graph" className="section-fade space-y-4">
+            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "graph" | "timeline")} className="section-fade space-y-4">
               <div className="flex flex-col gap-4 rounded-3xl border bg-card/70 p-4 shadow-sm backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between">
                 <div className="space-y-2">
                   <TabsList>
-                    <TabsTrigger value="graph" id="trace-graph-tab">Graph</TabsTrigger>
+                    <TabsTrigger value="graph">Graph</TabsTrigger>
                     <TabsTrigger value="timeline">Timeline</TabsTrigger>
                   </TabsList>
                   <p className="text-sm text-muted-foreground">
@@ -537,8 +581,8 @@ export function InteractiveTraceDetail({
                 </div>
                 <div className="text-sm text-muted-foreground">
                   {replayMode
-                    ? "Replay controls are anchored to the graph below."
-                    : "Start replay from the graph when you want to step through the cascade."}
+                    ? "Step-through controls are anchored to the graph below. This does not rerun your pipeline."
+                    : "Start stepping through recorded handoffs from the graph when you want to inspect the cascade."}
                 </div>
               </div>
 
@@ -560,11 +604,11 @@ export function InteractiveTraceDetail({
                     <div className="pointer-events-none absolute left-6 top-4 z-10 flex items-center gap-2">
                       {replayMode ? (
                         <Badge variant="outline" className="pointer-events-auto bg-background/85 backdrop-blur">
-                          Replay {replayProgressLabel}
+                          Step-through {replayProgressLabel}
                         </Badge>
                       ) : graph.edges.length > 0 ? (
                         <Badge variant="outline" className="pointer-events-auto bg-background/85 backdrop-blur">
-                          Replay available
+                          Step-through available
                         </Badge>
                       ) : null}
                     </div>
@@ -621,16 +665,16 @@ export function InteractiveTraceDetail({
                           </Button>
                           <Button onClick={() => stepReplay(1)}>Step forward</Button>
                           <Button variant="outline" onClick={openForkDialog}>
-                            Fork here
+                            Save draft here
                           </Button>
                           <Button variant="ghost" onClick={() => setReplayMode(false)}>
-                            Exit replay
+                            Exit step-through
                           </Button>
                         </>
                       ) : (
                         <Button onClick={() => setReplayMode(true)}>
                           <Play className="h-4 w-4" />
-                          Start replay
+                          Step through handoffs
                         </Button>
                       )}
                     </div>
@@ -782,8 +826,7 @@ export function InteractiveTraceDetail({
                     Causal chain
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    {trace.causal_attribution.explanation ??
-                      "No backend causal attribution is available for this trace yet."}
+                   {causalExplanation}
                   </p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
@@ -831,21 +874,21 @@ export function InteractiveTraceDetail({
                     <div className="rounded-2xl border bg-muted/20 p-4">
                       <div className="mb-2 text-sm font-medium">Payload preview</div>
                       <pre className="max-h-56 overflow-auto whitespace-pre-wrap text-xs font-mono text-muted-foreground">
-                        {formatJson(selectedMessage.message)}
+                        {formatJsonPreview(selectedMessage.message)}
                       </pre>
                     </div>
                     {selectedDraft ? (
                       <div className="rounded-2xl border bg-muted/20 p-4">
                         <div className="mb-2 text-sm font-medium">Saved fork draft</div>
                         <pre className="max-h-40 overflow-auto whitespace-pre-wrap text-xs font-mono text-muted-foreground">
-                          {formatJson(selectedDraft.payload)}
+                          {formatJsonPreview(selectedDraft.payload)}
                         </pre>
                       </div>
                     ) : null}
                     <div className="flex flex-wrap gap-2">
                       <Button onClick={() => setMessageOverlayOpen(true)}>Open full message</Button>
                       <Button variant="outline" onClick={openForkDialog}>
-                        Fork this handoff
+                        Save draft from this handoff
                       </Button>
                     </div>
                   </>
@@ -867,7 +910,9 @@ export function InteractiveTraceDetail({
               <CardContent className="space-y-3">
                 {selectedPathFailures.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
-                    No path-specific MAST failures for the current selection.
+                    {selectedMessage
+                      ? "No path-specific MAST failures for the current selection."
+                      : "Select an edge or timeline event to see failures on that path."}
                   </p>
                 ) : (
                   selectedPathFailures.map((failure) => (
@@ -891,7 +936,7 @@ export function InteractiveTraceDetail({
       </div>
 
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent side="right" className="flex w-[480px] flex-col gap-0 p-0 sm:max-w-[480px]">
+        <SheetContent side="right" className="flex w-full max-w-[480px] flex-col gap-0 p-0">
           <SheetHeader className="border-b px-6 py-5">
             <SheetTitle className="font-mono">
               {selectedAgent?.summary.agent_id ?? "Agent detail"}
@@ -945,7 +990,9 @@ export function InteractiveTraceDetail({
                       </span>
                     ) : null}
                   </TabsTrigger>
-                  <TabsTrigger value="context">Context</TabsTrigger>
+                  {selectedAgent.decision_context ? (
+                    <TabsTrigger value="context">Context</TabsTrigger>
+                  ) : null}
                 </TabsList>
                 <ScrollArea className="flex-1">
                   <TabsContent value="messages" className="mt-0 px-6 py-4">
@@ -967,7 +1014,7 @@ export function InteractiveTraceDetail({
                               <Badge variant="outline">{message.protocol}</Badge>
                             </div>
                             <pre className="mt-2 whitespace-pre-wrap text-xs font-mono text-muted-foreground">
-                              {formatJson(message.payload)}
+                              {formatJsonPreview(message.payload)}
                             </pre>
                           </button>
                         ))}
@@ -986,7 +1033,7 @@ export function InteractiveTraceDetail({
                               <Badge variant="outline">{toolCall.duration_ms}ms</Badge>
                             </div>
                             <pre className="mt-2 whitespace-pre-wrap text-xs font-mono text-muted-foreground">
-                              {formatJson(toolCall.input)}
+                              {formatJsonPreview(toolCall.input)}
                             </pre>
                           </div>
                         ))}
@@ -1012,17 +1059,13 @@ export function InteractiveTraceDetail({
                       </div>
                     )}
                   </TabsContent>
-                  <TabsContent value="context" className="mt-0 px-6 py-4">
-                    {selectedAgent.decision_context ? (
+                 {selectedAgent.decision_context ? (
+                    <TabsContent value="context" className="mt-0 px-6 py-4">
                       <pre className="whitespace-pre-wrap text-xs font-mono text-muted-foreground">
-                        {formatJson(selectedAgent.decision_context)}
+                        {formatJsonPreview(selectedAgent.decision_context)}
                       </pre>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        No decision context captured yet for this agent.
-                      </p>
-                    )}
-                  </TabsContent>
+                    </TabsContent>
+                  ) : null}
                 </ScrollArea>
               </Tabs>
             </>
@@ -1030,12 +1073,12 @@ export function InteractiveTraceDetail({
         </SheetContent>
       </Sheet>
 
-      <Dialog open={forkOpen} onOpenChange={setForkOpen}>
+      <Dialog open={forkOpen} onOpenChange={(open) => { setForkOpen(open); if (!open) setForkSaved(false); }}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Fork and resubmit</DialogTitle>
+            <DialogTitle>Save fork draft</DialogTitle>
             <DialogDescription>
-              Edit the latest message payload and stage it for replay.
+              Edit the latest message payload and save a draft at this handoff point.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -1058,15 +1101,19 @@ export function InteractiveTraceDetail({
               value={forkPayload}
               onChange={(event) => setForkPayload(event.target.value)}
             />
-            {!parsedForkPayload.valid ? (
-              <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                {parsedForkPayload.error}
-              </div>
-            ) : (
-              <div className="text-sm text-muted-foreground">
-                Save is enabled. Rifft will keep this draft attached to the selected handoff.
-              </div>
-            )}
+           {!parsedForkPayload.valid ? (
+  <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+    {parsedForkPayload.error}
+  </div>
+) : forkSaved ? (
+  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
+    Draft saved. Re-run your pipeline with this payload injected at the handoff point, then open the new trace to see whether the fix held.
+  </div>
+) : (
+  <div className="text-sm text-muted-foreground">
+    Save is enabled. Rifft will keep this draft attached to the selected handoff.
+  </div>
+)}
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setForkOpen(false)}>
@@ -1100,14 +1147,14 @@ export function InteractiveTraceDetail({
                 <div className="rounded-xl border bg-muted/30 p-4">
                   <div className="mb-2 text-sm font-medium">Payload</div>
                   <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs font-mono text-muted-foreground">
-                    {formatJson(selectedMessage.message)}
+                    {formatJsonPreview(selectedMessage.message)}
                   </pre>
                 </div>
                 {selectedDraft ? (
                   <div className="rounded-xl border bg-muted/30 p-4">
                     <div className="mb-2 text-sm font-medium">Saved fork draft</div>
                     <pre className="max-h-52 overflow-auto whitespace-pre-wrap text-xs font-mono text-muted-foreground">
-                      {formatJson(selectedDraft.payload)}
+                      {formatJsonPreview(selectedDraft.payload)}
                     </pre>
                   </div>
                 ) : null}
@@ -1125,8 +1172,7 @@ export function InteractiveTraceDetail({
                     <div>
                       <div className="font-medium text-foreground">Causal chain</div>
                       <div>
-                        {trace.causal_attribution.explanation ??
-                          "No backend causal attribution is available for this trace yet."}
+                        {causalExplanation}
                       </div>
                     </div>
                   </CardContent>
@@ -1151,7 +1197,7 @@ export function InteractiveTraceDetail({
                         openForkDialog();
                       }}
                     >
-                      Fork this message
+                      Save draft from this message
                     </Button>
                   </CardContent>
                 </Card>

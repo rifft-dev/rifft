@@ -1,27 +1,24 @@
 import { NextResponse } from "next/server";
+import Stripe from "stripe";
 import { getAccessTokenFromCookies, resolveActiveProjectId } from "@/lib/cloud-context";
+import { getRequestOrigin } from "@/lib/request-origin";
 
 const apiBaseUrl =
   process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-const polarApiBaseUrl = process.env.POLAR_API_BASE_URL ?? "https://api.polar.sh";
 
 type ProjectResponse = {
   id: string;
   account_id: string | null;
-  permissions?: {
-    can_manage_billing?: boolean;
-  };
+  permissions?: { can_manage_billing?: boolean };
 };
 
 type MeResponse = {
-  user: {
-    email: string | null;
-    name: string | null;
-  };
+  user: { email: string | null; name: string | null };
 };
 
-type PolarCheckoutResponse = {
-  url?: string;
+const PRICE_IDS: Record<string, string | undefined> = {
+  pro: process.env.STRIPE_PRO_PRICE_ID,
+  scale: process.env.STRIPE_SCALE_PRICE_ID,
 };
 
 export async function POST(request: Request) {
@@ -34,24 +31,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const polarAccessToken = process.env.POLAR_ACCESS_TOKEN;
-  const polarProProductId = process.env.POLAR_PRO_PRODUCT_ID;
-  if (!polarAccessToken || !polarProProductId) {
-    return NextResponse.json({ error: "polar_not_configured" }, { status: 500 });
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    return NextResponse.json({ error: "stripe_not_configured" }, { status: 500 });
+  }
+
+  const body = (await request.json().catch(() => ({}))) as { planKey?: string };
+  const planKey = body.planKey === "scale" ? "scale" : "pro";
+  const priceId = PRICE_IDS[planKey];
+  if (!priceId) {
+    return NextResponse.json({ error: "price_not_configured" }, { status: 500 });
   }
 
   const [projectResponse, meResponse] = await Promise.all([
     fetch(`${apiBaseUrl}/projects/${projectId}`, {
       cache: "no-store",
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-      },
+      headers: { authorization: `Bearer ${accessToken}` },
     }),
     fetch(`${apiBaseUrl}/cloud/me`, {
       cache: "no-store",
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-      },
+      headers: { authorization: `Bearer ${accessToken}` },
     }),
   ]);
 
@@ -65,50 +64,38 @@ export async function POST(request: Request) {
   if (!project.account_id) {
     return NextResponse.json({ error: "missing_account_id" }, { status: 400 });
   }
-
   if (!project.permissions?.can_manage_billing) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const successUrl = new URL("/settings?checkout=success", request.url).toString();
+  const stripe = new Stripe(stripeSecretKey);
+  const requestOrigin = getRequestOrigin(request);
+  const successUrl = new URL("/settings?checkout=success", requestOrigin).toString();
+  const cancelUrl = new URL("/settings", requestOrigin).toString();
 
-  const polarResponse = await fetch(`${polarApiBaseUrl}/v1/checkouts`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${polarAccessToken}`,
-      "content-type": "application/json",
+  const session = await stripe.checkout.sessions.create({
+    mode: "subscription",
+    line_items: [{ price: priceId, quantity: 1 }],
+    customer_email: me.user.email ?? undefined,
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    metadata: {
+      account_id: project.account_id,
+      project_id: project.id,
+      plan_key: planKey,
     },
-    body: JSON.stringify({
-      products: [polarProProductId],
-      external_customer_id: project.account_id,
-      customer_email: me.user.email ?? undefined,
-      customer_name: me.user.name ?? undefined,
-      success_url: successUrl,
+    subscription_data: {
       metadata: {
         account_id: project.account_id,
         project_id: project.id,
-        plan_key: "pro",
+        plan_key: planKey,
       },
-      customer_metadata: {
-        account_id: project.account_id,
-        project_id: project.id,
-        plan_key: "pro",
-      },
-    }),
+    },
   });
 
-  if (!polarResponse.ok) {
-    const details = await polarResponse.text();
-    return NextResponse.json(
-      { error: "polar_checkout_failed", details },
-      { status: polarResponse.status },
-    );
-  }
-
-  const polarCheckout = (await polarResponse.json()) as PolarCheckoutResponse;
-  if (!polarCheckout.url) {
+  if (!session.url) {
     return NextResponse.json({ error: "missing_checkout_url" }, { status: 500 });
   }
 
-  return NextResponse.json({ url: polarCheckout.url });
+  return NextResponse.json({ url: session.url });
 }

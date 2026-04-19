@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rifft — see what broke and why</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0c0c0c;display:flex;align-items:center;justify-content:center;padding:1.5rem;min-height:100%;color:#f5f5f5}
+  .card{background:#111;border:1px solid #1e1e1e;border-radius:20px;overflow:hidden;width:100%;max-width:560px;box-shadow:0 24px 80px rgba(0,0,0,0.45)}
+  .bar{background:#161616;border-bottom:1px solid #1e1e1e;padding:10px 16px;display:flex;align-items:center;gap:6px}
+  .dot{width:8px;height:8px;border-radius:50%;background:#2a2a2a}
+  .bar-url{font-size:11px;color:#595959;font-family:"SF Mono","Fira Mono",monospace;margin-left:6px}
+  .body{padding:20px;display:flex;flex-direction:column;gap:16px;background:
+    radial-gradient(circle at top right, rgba(74,222,128,0.08), transparent 35%),
+    #111}
+  .hero{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+  .hero-copy{flex:1}
+  .label{font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:0.1em;color:#5f5f5f;margin-bottom:8px}
+  .trace-name{font-size:20px;font-weight:650;color:#f0f0f0;letter-spacing:-0.03em;line-height:1.1}
+  .trace-meta{font-size:12px;color:#7a7a7a;margin-top:6px}
+  .status-pill{padding:7px 10px;border-radius:999px;font-size:11px;font-weight:600;color:#fca5a5;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.2);white-space:nowrap}
+  .pill-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+  .pill{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500}
+  .pill-red{background:rgba(239,68,68,0.12);color:#f87171;border:1px solid rgba(239,68,68,0.2)}
+  .agents{display:flex;align-items:center;margin:4px 0}
+  .agent-box{flex:1;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:3px}
+  .agent-box.red{background:rgba(239,68,68,0.08);border:1.5px solid rgba(239,68,68,0.3)}
+  .agent-box.neutral{background:#151515;border:1px solid #242424}
+  .agent-name{font-size:13px;font-weight:600;color:#e5e5e5}
+  .agent-tag{font-size:10px;color:#6d6d6d}
+  .agent-tag.red{color:#f87171}
+  .arrow-wrap{display:flex;flex-direction:column;align-items:center;padding:0 8px;gap:3px;flex-shrink:0}
+  .arrow-line{display:flex;align-items:center}
+  .arrow-shaft{height:1.5px;width:28px;background:#ef4444}
+  .arrow-head{width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:6px solid #ef4444}
+  .arrow-label{font-size:9px;color:#ef4444;text-align:center;white-space:nowrap}
+  .section{display:flex;flex-direction:column;gap:10px}
+  .insight-row{display:grid;grid-template-columns:1fr;gap:10px}
+  .insight{background:#161616;border:1px solid #1e1e1e;border-radius:12px;padding:12px}
+  .insight.red{border-color:rgba(239,68,68,0.2);background:rgba(239,68,68,0.04)}
+  .insight-label{font-size:10px;text-transform:uppercase;letter-spacing:0.09em;color:#575757;margin-bottom:5px}
+  .insight.red .insight-label{color:#f87171}
+  .insight-val{font-size:13px;font-weight:600;color:#e5e5e5}
+  .insight.red .insight-val{color:#fca5a5}
+  .insight-sub{font-size:11px;color:#8a8a8a;margin-top:3px;line-height:1.5}
+  @media (max-width:640px){
+    body{padding:1rem}
+    .hero{flex-direction:column}
+    .insight-row{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="bar">
+    <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+    <span class="bar-url">rifft.dev · trace detail</span>
+  </div>
+  <div class="body">
+    <div class="hero">
+      <div class="hero-copy">
+      <div class="label">Failed run</div>
+      <div class="trace-name">Research → publish pipeline</div>
+      <div class="trace-meta">2 agents · 4.2s · $0.003 · 3 min ago</div>
+      <div class="pill-row">
+        <span class="pill pill-red">unverified output</span>
+        <span class="pill pill-red">needs replay</span>
+      </div>
+      </div>
+      <div class="status-pill">Failure traced</div>
+    </div>
+    <div class="section">
+      <div class="label">Where it broke</div>
+      <div class="agents">
+        <div class="agent-box red">
+          <div class="agent-name">Researcher</div>
+          <div class="agent-tag red">root cause</div>
+          <div class="agent-tag">2.1s · $0.0018</div>
+        </div>
+        <div class="arrow-wrap">
+          <div class="arrow-line">
+            <div class="arrow-shaft"></div>
+            <div class="arrow-head"></div>
+          </div>
+          <div class="arrow-label">bad data</div>
+        </div>
+        <div class="agent-box neutral">
+          <div class="agent-name">Publisher</div>
+          <div class="agent-tag">received bad handoff</div>
+          <div class="agent-tag">2.1s · $0.0013</div>
+        </div>
+      </div>
+    </div>
+    <div class="insight-row">
+      <div class="insight red">
+        <div class="insight-label">Why it failed</div>
+        <div class="insight-val">Unverified output</div>
+        <div class="insight-sub">Researcher passed unvalidated data to Publisher with no confidence check</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

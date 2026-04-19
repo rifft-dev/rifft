@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, ArrowRight, CheckCircle2, Search, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, Loader2, Search, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,16 +16,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { getTraceToneLabels } from "@/lib/utils";
+import { getCloudTraces } from "../lib/client-api";
+import { formatCurrency, formatDuration, getTraceDisplayName, getTraceToneLabels } from "@/lib/utils";
 import type { TraceSummary } from "../lib/api-types";
-
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 4,
-  }).format(value);
 
 const formatRelative = (value: string) => {
   const now = Date.now();
@@ -73,11 +66,26 @@ const getTraceTone = (trace: TraceSummary) => {
   return { card: TRACE_TONE_CARD[tier], label, labelClass, signalClass: TRACE_TONE_SIGNAL[tier] };
 };
 
-export function TraceListClient({ traces, initialMode }: { traces: TraceSummary[]; initialMode?: string | null }) {
+export function TraceListClient({
+  traces: initialTraces,
+  total,
+  initialMode,
+}: {
+  traces: TraceSummary[];
+  total: number;
+  initialMode?: string | null;
+}) {
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [traces, setTraces] = useState(initialTraces);
+  const [loadedPage, setLoadedPage] = useState(1);
   const [query, setQuery] = useState(initialMode ?? "");
   const [status, setStatus] = useState("all");
   const [framework, setFramework] = useState("all");
+  const frameworks = useMemo(
+    () => [...new Set(traces.flatMap((trace) => trace.framework))].sort((left, right) => left.localeCompare(right)),
+    [traces],
+  );
 
   const filtered = useMemo(
     () =>
@@ -97,6 +105,7 @@ export function TraceListClient({ traces, initialMode }: { traces: TraceSummary[
         .sort((left, right) => getPriorityScore(right) - getPriorityScore(left)),
     [framework, query, status, traces],
   );
+  const canLoadMore = traces.length < total;
 
   const firstIncident = filtered.find((trace) => trace.status === "error" || trace.mast_failures.length > 0) ?? filtered[0] ?? null;
 
@@ -140,9 +149,11 @@ export function TraceListClient({ traces, initialMode }: { traces: TraceSummary[
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All frameworks</SelectItem>
-                <SelectItem value="crewai">CrewAI</SelectItem>
-                <SelectItem value="autogen">AutoGen</SelectItem>
-                <SelectItem value="custom">Custom</SelectItem>
+                {frameworks.map((item) => (
+                  <SelectItem key={item} value={item}>
+                    {item}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -172,7 +183,7 @@ export function TraceListClient({ traces, initialMode }: { traces: TraceSummary[
                   <AlertTriangle className="h-4 w-4" />
                   Open this one first
                 </div>
-                <div className="font-mono text-sm">{firstIncident.trace_id}</div>
+                <div className="font-mono text-sm">{getTraceDisplayName(firstIncident)}</div>
                 <div className="flex flex-wrap gap-2">
                   <Badge variant={statusVariant(firstIncident.status)}>{firstIncident.status}</Badge>
                   {firstIncident.mast_failures.slice(0, 2).map((failure) => (
@@ -248,9 +259,9 @@ export function TraceListClient({ traces, initialMode }: { traces: TraceSummary[
                       <Badge variant="outline">{formatRelative(trace.started_at)}</Badge>
                     </div>
                     <div>
-                      <div className="font-mono text-sm">{trace.trace_id}</div>
+                      <div className="font-mono text-sm">{getTraceDisplayName(trace)}</div>
                       <div className="mt-1 text-sm text-muted-foreground">
-                        {trace.agent_count} agents • {trace.duration_ms}ms • {formatCurrency(trace.total_cost_usd)}
+                        {trace.agent_count} agents • {formatDuration(trace.duration_ms)} • {formatCurrency(trace.total_cost_usd)}
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -303,6 +314,36 @@ export function TraceListClient({ traces, initialMode }: { traces: TraceSummary[
           })
         )}
       </div>
+      {canLoadMore ? (
+        <div className="flex justify-center">
+          <Button
+            variant="outline"
+            disabled={isPending}
+            onClick={() => {
+              startTransition(async () => {
+                const nextPage = loadedPage + 1;
+                const data = await getCloudTraces({ page: nextPage, pageSize: 20 });
+                setTraces((current) => [
+                  ...current,
+                  ...data.traces.filter(
+                    (trace) => !current.some((existing) => existing.trace_id === trace.trace_id),
+                  ),
+                ]);
+                setLoadedPage(nextPage);
+              });
+            }}
+          >
+            {isPending ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading more
+              </>
+            ) : (
+              "Load more traces"
+            )}
+          </Button>
+        </div>
+      ) : null}
       </div>
     </TooltipProvider>
   );

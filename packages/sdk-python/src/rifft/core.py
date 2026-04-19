@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import functools
+import importlib
+import importlib.util
 import inspect
 import json
+import os
+from pathlib import Path
 import sys
 import threading
 import urllib.request
@@ -28,6 +32,7 @@ class _Config:
     project_id: str
     endpoint: str
     api_key: Optional[str] = None
+    service_name: str = "rifft-sdk-python"
 
 
 class _JsonTraceExporter(SpanExporter):
@@ -262,6 +267,35 @@ def _normalize_endpoint(endpoint: str) -> str:
     return endpoint.rstrip("/") + "/v1/traces"
 
 
+def _detect_service_name() -> str:
+    configured = os.getenv("RIFFT_SERVICE_NAME")
+    if configured:
+        return configured
+
+    cwd_name = Path.cwd().name.strip()
+    if cwd_name:
+        return cwd_name
+
+    return "rifft-sdk-python"
+
+
+def _auto_instrument_frameworks() -> tuple[str, ...]:
+    instrumented: list[str] = []
+    for framework_name in ("crewai", "autogen", "mcp"):
+        module_name = f"rifft.adapters.{framework_name}"
+        if importlib.util.find_spec(module_name) is None:
+            continue
+
+        try:
+            importlib.import_module(module_name)
+        except Exception:
+            continue
+
+        instrumented.append(framework_name)
+
+    return tuple(instrumented)
+
+
 def _ensure_provider() -> None:
     global _provider_initialized
 
@@ -276,7 +310,7 @@ def _ensure_provider() -> None:
 
         resource = Resource.create(
             {
-                "service.name": "rifft-sdk-python",
+                "service.name": config.service_name,
                 "project_id": config.project_id,
             }
         )
@@ -308,9 +342,25 @@ def get_current_framework() -> Optional[str]:
     return _CURRENT_FRAMEWORK.get()
 
 
-def init(*, project_id: str, endpoint: str, api_key: Optional[str] = None) -> None:
+def init(
+    *,
+    project_id: Optional[str] = None,
+    endpoint: Optional[str] = None,
+    api_key: Optional[str] = None,
+    service_name: Optional[str] = None,
+    auto_instrument: bool = True,
+) -> None:
     global _config
-    _config = _Config(project_id=project_id, endpoint=endpoint, api_key=api_key)
+
+    resolved_config = _Config(
+        project_id=project_id or os.getenv("RIFFT_PROJECT_ID") or "default",
+        endpoint=endpoint or os.getenv("RIFFT_ENDPOINT") or "http://localhost:4318",
+        api_key=api_key if api_key is not None else os.getenv("RIFFT_API_KEY"),
+        service_name=service_name or _detect_service_name(),
+    )
+    _config = resolved_config
+    if auto_instrument:
+        _auto_instrument_frameworks()
     _ensure_provider()
 
 

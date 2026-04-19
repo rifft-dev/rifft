@@ -48,15 +48,20 @@ export function ApiKeyCard({
           Copy
         </Button>
         <Button
-          variant="outline"
-          type="button"
-          disabled={isRegenerating || !canRotate}
-          onClick={async () => {
-            try {
-              setIsRegenerating(true);
-              const response = await fetch(`/api/projects/${projectId}?action=regenerate-api-key`, {
-                method: "POST",
-              });
+  variant="outline"
+  type="button"
+  disabled={isRegenerating || !canRotate}
+  onClick={async () => {
+    if (!window.confirm(
+      "Rotating the key immediately invalidates the current one. Any running agents using the old key will start failing. Continue?"
+    )) {
+      return;
+    }
+    try {
+      setIsRegenerating(true);
+      const response = await fetch(`/api/projects/${projectId}?action=regenerate-api-key`, {
+        method: "POST",
+      });
               if (!response.ok) {
                 const data = (await response.json().catch(() => ({}))) as { error?: string };
                 throw new Error(
