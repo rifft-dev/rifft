@@ -3405,6 +3405,173 @@ export const createIncidentShare = async (
   return token;
 };
 
+// ─── Weekly digest ───────────────────────────────────────────────────────────
+
+export type WeeklyDigestStats = {
+  /** Spans ingested in the last 7 days */
+  spans_this_week: number;
+  /** Spans ingested in the 7 days before that */
+  spans_last_week: number;
+  /** Traces started in the last 7 days */
+  traces_this_week: number;
+  /** Traces with at least one fatal MAST failure in the last 7 days */
+  fatal_traces_this_week: number;
+  /** Top agents by span count this week (up to 5) */
+  top_agents: Array<{ agent_id: string; span_count: number; avg_duration_ms: number }>;
+  /** MAST failure mode breakdown for the last 7 days */
+  mast_breakdown: Array<{ mode: string; severity: "fatal" | "benign"; affected_traces: number }>;
+  /** The trace_id of the most recent fatal trace, for a direct CTA link */
+  worst_trace_id: string | null;
+};
+
+export const getWeeklyDigestStats = async (projectId: string): Promise<WeeklyDigestStats> => {
+  const now = new Date();
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+
+  const fmtDateTime = (d: Date) =>
+    d.toISOString().slice(0, 19).replace("T", " ");
+
+  // Span counts: this week and last week — both from ClickHouse
+  const [spansThisWeekRows, spansLastWeekRows, topAgentsRows] = await Promise.all([
+    queryClickHouse<{ total: string }>(
+      `
+        SELECT COUNT(*) AS total
+        FROM rifft.spans
+        WHERE project_id = '${escapeValue(projectId)}'
+          AND start_time >= toDateTime('${fmtDateTime(weekAgo)}')
+      `,
+    ).catch(() => [] as { total: string }[]),
+
+    queryClickHouse<{ total: string }>(
+      `
+        SELECT COUNT(*) AS total
+        FROM rifft.spans
+        WHERE project_id = '${escapeValue(projectId)}'
+          AND start_time >= toDateTime('${fmtDateTime(twoWeeksAgo)}')
+          AND start_time < toDateTime('${fmtDateTime(weekAgo)}')
+      `,
+    ).catch(() => [] as { total: string }[]),
+
+    queryClickHouse<{ agent_id: string; span_count: string; avg_duration_ms: string }>(
+      `
+        SELECT
+          agent_id,
+          COUNT(*) AS span_count,
+          AVG(duration_ms) AS avg_duration_ms
+        FROM rifft.spans
+        WHERE project_id = '${escapeValue(projectId)}'
+          AND agent_id != ''
+          AND start_time >= toDateTime('${fmtDateTime(weekAgo)}')
+        GROUP BY agent_id
+        ORDER BY span_count DESC
+        LIMIT 5
+      `,
+    ).catch(() => [] as { agent_id: string; span_count: string; avg_duration_ms: string }[]),
+  ]);
+
+  // Trace-level stats from Postgres
+  const traceResult = await pgPool.query<{
+    trace_id: string;
+    mast_failures: unknown;
+    has_fatal: boolean;
+  }>(
+    `
+      SELECT
+        trace_id,
+        mast_failures,
+        EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(
+            CASE WHEN jsonb_typeof(mast_failures::jsonb) = 'array'
+              THEN mast_failures::jsonb
+              ELSE '[]'::jsonb
+            END
+          ) AS f
+          WHERE (f->>'severity') = 'fatal'
+        ) AS has_fatal
+      FROM traces
+      WHERE project_id = $1
+        AND started_at >= $2
+      ORDER BY started_at DESC
+    `,
+    [projectId, weekAgo.toISOString()],
+  );
+
+  const traceRows = traceResult.rows;
+  const fatalTraces = traceRows.filter((r) => r.has_fatal);
+
+  // Build MAST breakdown
+  const modeMap = new Map<string, { severity: "fatal" | "benign"; affected: Set<string> }>();
+  for (const row of traceRows) {
+    const failures = (
+      Array.isArray(row.mast_failures)
+        ? row.mast_failures
+        : parseJson<MastFailure[]>(JSON.stringify(row.mast_failures ?? []), [])
+    ) as MastFailure[];
+
+    const seenInTrace = new Set<string>();
+    for (const f of failures) {
+      if (seenInTrace.has(f.mode)) continue;
+      seenInTrace.add(f.mode);
+      const existing = modeMap.get(f.mode) ?? { severity: "benign", affected: new Set() };
+      if (f.severity === "fatal") existing.severity = "fatal";
+      existing.affected.add(row.trace_id);
+      modeMap.set(f.mode, existing);
+    }
+  }
+
+  const mastBreakdown = [...modeMap.entries()]
+    .sort((a, b) => b[1].affected.size - a[1].affected.size)
+    .slice(0, 6)
+    .map(([mode, entry]) => ({
+      mode,
+      severity: entry.severity,
+      affected_traces: entry.affected.size,
+    }));
+
+  return {
+    spans_this_week: Number(spansThisWeekRows[0]?.total ?? 0),
+    spans_last_week: Number(spansLastWeekRows[0]?.total ?? 0),
+    traces_this_week: traceRows.length,
+    fatal_traces_this_week: fatalTraces.length,
+    top_agents: topAgentsRows.map((r) => ({
+      agent_id: r.agent_id,
+      span_count: Number(r.span_count),
+      avg_duration_ms: Math.round(Number(r.avg_duration_ms)),
+    })),
+    mast_breakdown: mastBreakdown,
+    worst_trace_id: fatalTraces[0]?.trace_id ?? traceRows[0]?.trace_id ?? null,
+  };
+};
+
+export const getScaleProjectsWithDigestEnabled = async (): Promise<
+  Array<{ project_id: string; name: string; alert_email: string | null; slack_webhook_url: string | null }>
+> => {
+  const result = await pgPool.query<{
+    project_id: string;
+    name: string;
+    alert_email: string | null;
+    slack_webhook_url: string | null;
+  }>(
+    `
+      SELECT
+        p.id AS project_id,
+        p.name,
+        p.alert_email,
+        p.slack_webhook_url
+      FROM projects p
+      JOIN accounts a ON a.id = p.account_id
+      JOIN subscriptions s ON s.account_id = a.id
+      WHERE p.regression_digest_enabled = TRUE
+        AND s.plan_key = 'scale'
+        AND s.status IN ('active', 'trialing')
+      ORDER BY p.id
+    `,
+  );
+  return result.rows;
+};
+
 export const getIncidentShareByToken = async (
   token: string,
 ): Promise<{ token: string; trace_id: string; project_id: string; created_at: string } | null> => {

@@ -47,6 +47,8 @@ import {
   createIncidentShare,
   getIncidentShareByToken,
   detectRegressions,
+  getWeeklyDigestStats,
+  getScaleProjectsWithDigestEnabled,
 } from "./queries.js";
 
 const port = Number(process.env.PORT ?? 4000);
@@ -501,6 +503,8 @@ type AppDeps = {
   getIncidentShareByToken: typeof getIncidentShareByToken;
   getTraceProjectId: typeof getTraceProjectId;
   detectRegressions: typeof detectRegressions;
+  getWeeklyDigestStats: typeof getWeeklyDigestStats;
+  getScaleProjectsWithDigestEnabled: typeof getScaleProjectsWithDigestEnabled;
   pgQuery: (query: string, params?: unknown[]) => Promise<unknown>;
 };
 
@@ -534,6 +538,8 @@ export const createApp = (
     getIncidentShareByToken,
     getTraceProjectId,
     detectRegressions,
+    getWeeklyDigestStats,
+    getScaleProjectsWithDigestEnabled,
     pgQuery: pgPool.query.bind(pgPool),
     ...deps,
   };
@@ -1739,88 +1745,251 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
       return { skipped: true, reason: "no_destination" };
     }
 
-    const regressions = await resolvedDeps.detectRegressions(projectId);
-    if (regressions.length === 0) {
-      return { skipped: true, reason: "no_regressions" };
+    // Gather richer weekly stats alongside regression detection
+    const [regressions, stats] = await Promise.all([
+      resolvedDeps.detectRegressions(projectId),
+      resolvedDeps.getWeeklyDigestStats(projectId),
+    ]);
+
+    // Skip only if there were zero traces this week (nothing to report)
+    if (stats.traces_this_week === 0) {
+      return { skipped: true, reason: "no_activity" };
     }
 
     const formatRate = (rate: number) => `${Math.round(rate * 100)}%`;
-    const formatMode = (mode: string) => mode.replaceAll("_", " ");
+    const formatMode = (mode: string) =>
+      mode.replaceAll("_", " ").replace(/^\w/, (c) => c.toUpperCase());
+    const formatNumber = (n: number) =>
+      n >= 1_000_000
+        ? `${(n / 1_000_000).toFixed(1)}M`
+        : n >= 1_000
+        ? `${(n / 1_000).toFixed(1)}K`
+        : String(n);
+    const formatMs = (ms: number) =>
+      ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+
+    const spanTrend =
+      stats.spans_last_week > 0
+        ? Math.round(
+            ((stats.spans_this_week - stats.spans_last_week) / stats.spans_last_week) * 100,
+          )
+        : null;
+    const spanTrendStr =
+      spanTrend === null
+        ? "first week"
+        : spanTrend > 0
+        ? `+${spanTrend}% vs last week`
+        : spanTrend < 0
+        ? `${spanTrend}% vs last week`
+        : "same as last week";
 
     const topRegressions = regressions.slice(0, 5);
+    const ctaUrl =
+      stats.worst_trace_id
+        ? `${appBaseUrl}/traces/${stats.worst_trace_id}`
+        : `${appBaseUrl}/traces`;
 
-    const slackBodyLines = topRegressions.map((r) => {
-      const rateStr = `${formatRate(r.recent_rate)} of traces this week`;
-      const deltaStr =
-        r.historical_rate === 0
-          ? `new this week, ${r.recent_affected_count} trace${r.recent_affected_count === 1 ? "" : "s"}`
-          : `up from ${formatRate(r.historical_rate)} (+${Math.round(r.rate_delta * 100)}pp)`;
-      const agentStr = r.dominant_agent_id ? ` — ${r.dominant_agent_id}` : "";
-      return `${formatMode(r.mode)}: ${rateStr} (${deltaStr})${agentStr}`;
-    });
+    // ── Email HTML ────────────────────────────────────────────────────────────
 
-    const emailRows = topRegressions
-      .map((r) => {
-        const deltaStr =
-          r.historical_rate === 0
-            ? "New this week"
-            : `+${Math.round(r.rate_delta * 100)}pp vs prior 3 weeks`;
-        const agentStr = r.dominant_agent_id ? `<br/><span style="font-size:12px;color:#888">${r.dominant_agent_id}</span>` : "";
-        return `<tr>
-          <td style="padding:8px 12px;border-bottom:1px solid #eee">${r.severity === "fatal" ? "⚠️" : "•"} ${formatMode(r.mode)}${agentStr}</td>
-          <td style="padding:8px 12px;border-bottom:1px solid #eee">${formatRate(r.recent_rate)}</td>
-          <td style="padding:8px 12px;border-bottom:1px solid #eee">${formatRate(r.historical_rate)}</td>
-          <td style="padding:8px 12px;border-bottom:1px solid #eee">${deltaStr}</td>
-        </tr>`;
-      })
-      .join("");
+    const summaryCards = `
+      <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
+        <tr>
+          <td style="padding:12px 16px;background:#f9f9f9;border-radius:8px;text-align:center;width:25%">
+            <div style="font-family:sans-serif;font-size:22px;font-weight:600;color:#111">${formatNumber(stats.spans_this_week)}</div>
+            <div style="font-family:sans-serif;font-size:12px;color:#666;margin-top:2px">spans</div>
+            <div style="font-family:sans-serif;font-size:11px;color:#888;margin-top:2px">${spanTrendStr}</div>
+          </td>
+          <td style="width:8px"></td>
+          <td style="padding:12px 16px;background:#f9f9f9;border-radius:8px;text-align:center;width:25%">
+            <div style="font-family:sans-serif;font-size:22px;font-weight:600;color:#111">${stats.traces_this_week}</div>
+            <div style="font-family:sans-serif;font-size:12px;color:#666;margin-top:2px">traces</div>
+          </td>
+          <td style="width:8px"></td>
+          <td style="padding:12px 16px;background:${stats.fatal_traces_this_week > 0 ? "#fff5f5" : "#f9f9f9"};border-radius:8px;text-align:center;width:25%">
+            <div style="font-family:sans-serif;font-size:22px;font-weight:600;color:${stats.fatal_traces_this_week > 0 ? "#c00" : "#111"}">${stats.fatal_traces_this_week}</div>
+            <div style="font-family:sans-serif;font-size:12px;color:#666;margin-top:2px">fatal failures</div>
+          </td>
+          <td style="width:8px"></td>
+          <td style="padding:12px 16px;background:#f9f9f9;border-radius:8px;text-align:center;width:25%">
+            <div style="font-family:sans-serif;font-size:22px;font-weight:600;color:#111">${regressions.length}</div>
+            <div style="font-family:sans-serif;font-size:12px;color:#666;margin-top:2px">regressions</div>
+          </td>
+        </tr>
+      </table>
+    `;
+
+    const agentRows =
+      stats.top_agents.length > 0
+        ? stats.top_agents
+            .map(
+              (a) =>
+                `<tr>
+                  <td style="padding:7px 12px;border-bottom:1px solid #eee;font-family:sans-serif;font-size:13px">${a.agent_id}</td>
+                  <td style="padding:7px 12px;border-bottom:1px solid #eee;font-family:sans-serif;font-size:13px;text-align:right">${formatNumber(a.span_count)}</td>
+                  <td style="padding:7px 12px;border-bottom:1px solid #eee;font-family:sans-serif;font-size:13px;text-align:right">${formatMs(a.avg_duration_ms)} avg</td>
+                </tr>`,
+            )
+            .join("")
+        : `<tr><td colspan="3" style="padding:12px;font-family:sans-serif;font-size:13px;color:#888">No agent spans recorded this week.</td></tr>`;
+
+    const regressionRows =
+      topRegressions.length > 0
+        ? topRegressions
+            .map((r) => {
+              const deltaStr =
+                r.historical_rate === 0
+                  ? "New this week"
+                  : `+${Math.round(r.rate_delta * 100)}pp vs prior 3w`;
+              const agentStr = r.dominant_agent_id
+                ? `<br/><span style="font-size:11px;color:#888">${r.dominant_agent_id}</span>`
+                : "";
+              return `<tr>
+                <td style="padding:7px 12px;border-bottom:1px solid #eee;font-family:sans-serif;font-size:13px">${r.severity === "fatal" ? "⚠️ " : "• "}${formatMode(r.mode)}${agentStr}</td>
+                <td style="padding:7px 12px;border-bottom:1px solid #eee;font-family:sans-serif;font-size:13px;text-align:right">${formatRate(r.recent_rate)}</td>
+                <td style="padding:7px 12px;border-bottom:1px solid #eee;font-family:sans-serif;font-size:13px;text-align:right">${formatRate(r.historical_rate)}</td>
+                <td style="padding:7px 12px;border-bottom:1px solid #eee;font-family:sans-serif;font-size:13px;text-align:right">${deltaStr}</td>
+              </tr>`;
+            })
+            .join("")
+        : `<tr><td colspan="4" style="padding:12px;font-family:sans-serif;font-size:13px;color:#888">No regressions detected — failure rates are stable.</td></tr>`;
 
     const emailHtml = `
-      <h2 style="font-family:sans-serif;font-size:18px;margin-bottom:8px">Weekly regression digest: ${projectName}</h2>
-      <p style="font-family:sans-serif;font-size:14px;color:#555;margin-bottom:16px">
-        Rifft detected ${regressions.length} failure mode${regressions.length === 1 ? "" : "s"} trending upward over the last 7 days
-        (compared to the previous 3 weeks, across ${topRegressions[0]?.recent_window_size ?? 0} recent traces).
-      </p>
-      <table style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:14px">
-        <thead>
-          <tr style="background:#f5f5f5">
-            <th style="padding:8px 12px;text-align:left">Failure mode</th>
-            <th style="padding:8px 12px;text-align:left">This week</th>
-            <th style="padding:8px 12px;text-align:left">Prior baseline</th>
-            <th style="padding:8px 12px;text-align:left">Change</th>
+      <!DOCTYPE html>
+      <html>
+      <body style="margin:0;padding:0;background:#fff">
+        <table style="max-width:600px;margin:32px auto;padding:0 16px" cellpadding="0" cellspacing="0">
+          <tr>
+            <td>
+              <p style="font-family:sans-serif;font-size:12px;color:#aaa;margin:0 0 20px">
+                Rifft · Weekly digest · ${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}
+              </p>
+
+              <h1 style="font-family:sans-serif;font-size:22px;font-weight:600;color:#111;margin:0 0 4px">
+                ${projectName}
+              </h1>
+              <p style="font-family:sans-serif;font-size:14px;color:#666;margin:0 0 24px">
+                Here's how your agents performed over the last 7 days.
+              </p>
+
+              ${summaryCards}
+
+              <h2 style="font-family:sans-serif;font-size:15px;font-weight:600;color:#111;margin:0 0 8px">Top agents by activity</h2>
+              <table style="width:100%;border-collapse:collapse;margin-bottom:28px">
+                <thead>
+                  <tr style="background:#f5f5f5">
+                    <th style="padding:7px 12px;text-align:left;font-family:sans-serif;font-size:12px;color:#555;font-weight:600">Agent</th>
+                    <th style="padding:7px 12px;text-align:right;font-family:sans-serif;font-size:12px;color:#555;font-weight:600">Spans</th>
+                    <th style="padding:7px 12px;text-align:right;font-family:sans-serif;font-size:12px;color:#555;font-weight:600">Duration</th>
+                  </tr>
+                </thead>
+                <tbody>${agentRows}</tbody>
+              </table>
+
+              <h2 style="font-family:sans-serif;font-size:15px;font-weight:600;color:#111;margin:0 0 8px">Regressions detected</h2>
+              <p style="font-family:sans-serif;font-size:13px;color:#666;margin:0 0 10px">
+                Failure modes that increased significantly vs the prior 3 weeks.
+              </p>
+              <table style="width:100%;border-collapse:collapse;margin-bottom:28px">
+                <thead>
+                  <tr style="background:#f5f5f5">
+                    <th style="padding:7px 12px;text-align:left;font-family:sans-serif;font-size:12px;color:#555;font-weight:600">Failure mode</th>
+                    <th style="padding:7px 12px;text-align:right;font-family:sans-serif;font-size:12px;color:#555;font-weight:600">This week</th>
+                    <th style="padding:7px 12px;text-align:right;font-family:sans-serif;font-size:12px;color:#555;font-weight:600">Baseline</th>
+                    <th style="padding:7px 12px;text-align:right;font-family:sans-serif;font-size:12px;color:#555;font-weight:600">Change</th>
+                  </tr>
+                </thead>
+                <tbody>${regressionRows}</tbody>
+              </table>
+
+              <table style="margin-bottom:32px" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="background:#111;border-radius:6px">
+                    <a href="${ctaUrl}" style="display:inline-block;padding:10px 20px;font-family:sans-serif;font-size:14px;font-weight:500;color:#fff;text-decoration:none">
+                      ${stats.worst_trace_id && stats.fatal_traces_this_week > 0 ? "Inspect worst trace →" : "Open workspace →"}
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="font-family:sans-serif;font-size:11px;color:#bbb;border-top:1px solid #eee;padding-top:16px">
+                You're receiving this because weekly digest is enabled for ${projectName}.
+                Manage alert settings at <a href="${appBaseUrl}/settings" style="color:#bbb">${appBaseUrl}/settings</a>.
+              </p>
+            </td>
           </tr>
-        </thead>
-        <tbody>${emailRows}</tbody>
-      </table>
-      <p style="margin-top:20px;font-family:sans-serif;font-size:14px">
-        <a href="${appBaseUrl}/traces">Open workspace in Rifft →</a>
-      </p>
+        </table>
+      </body>
+      </html>
     `;
 
     const emailText = [
-      `Weekly regression digest: ${projectName}`,
-      `${regressions.length} failure mode(s) trending up over the last 7 days:`,
+      `Rifft weekly digest: ${projectName}`,
+      `Week ending ${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}`,
       "",
-      ...topRegressions.map((r) => {
-        const deltaStr =
-          r.historical_rate === 0
-            ? `new this week`
-            : `up from ${formatRate(r.historical_rate)} (+${Math.round(r.rate_delta * 100)}pp)`;
-        return `- ${formatMode(r.mode)}: ${formatRate(r.recent_rate)} of traces (${deltaStr})`;
-      }),
+      `Spans: ${formatNumber(stats.spans_this_week)} (${spanTrendStr})`,
+      `Traces: ${stats.traces_this_week}`,
+      `Fatal failures: ${stats.fatal_traces_this_week}`,
+      `Regressions: ${regressions.length}`,
       "",
-      `Open workspace: ${appBaseUrl}/traces`,
+      ...(stats.top_agents.length > 0
+        ? [
+            "Top agents:",
+            ...stats.top_agents.map(
+              (a) => `  ${a.agent_id}: ${formatNumber(a.span_count)} spans, ${formatMs(a.avg_duration_ms)} avg`,
+            ),
+            "",
+          ]
+        : []),
+      ...(topRegressions.length > 0
+        ? [
+            "Regressions:",
+            ...topRegressions.map((r) => {
+              const deltaStr =
+                r.historical_rate === 0
+                  ? "new this week"
+                  : `up from ${formatRate(r.historical_rate)} (+${Math.round(r.rate_delta * 100)}pp)`;
+              return `  ${formatMode(r.mode)}: ${formatRate(r.recent_rate)} of traces (${deltaStr})`;
+            }),
+            "",
+          ]
+        : ["No regressions detected this week.", ""]),
+      ctaUrl,
     ].join("\n");
 
+    // ── Slack body ─────────────────────────────────────────────────────────────
+
+    const slackBodyLines = [
+      `*${formatNumber(stats.spans_this_week)} spans* · ${stats.traces_this_week} traces · ${stats.fatal_traces_this_week} fatal failures (${spanTrendStr})`,
+      ...(topRegressions.length > 0
+        ? [
+            "",
+            ...topRegressions.map((r) => {
+              const deltaStr =
+                r.historical_rate === 0
+                  ? `new, ${r.recent_affected_count} trace${r.recent_affected_count === 1 ? "" : "s"}`
+                  : `up from ${formatRate(r.historical_rate)} (+${Math.round(r.rate_delta * 100)}pp)`;
+              const agentStr = r.dominant_agent_id ? ` — ${r.dominant_agent_id}` : "";
+              return `${r.severity === "fatal" ? "⚠️" : "•"} ${formatMode(r.mode)}: ${formatRate(r.recent_rate)} (${deltaStr})${agentStr}`;
+            }),
+          ]
+        : ["No regressions detected — failure rates are stable."]),
+    ];
+
+    // ── Dispatch ───────────────────────────────────────────────────────────────
+
     const results: { slack?: string; email?: string } = {};
+    const digestSubject =
+      regressions.length > 0
+        ? `Rifft weekly digest: ${regressions.length} regression${regressions.length === 1 ? "" : "s"} in ${projectName}`
+        : `Rifft weekly digest: ${projectName} — ${stats.traces_this_week} traces this week`;
 
     if (slack_webhook_url) {
       try {
         await sendSlackAlert({
           webhookUrl: slack_webhook_url,
-          title: `Weekly regression digest: ${projectName}`,
+          title: `Weekly digest: ${projectName}`,
           bodyLines: slackBodyLines,
-          actionUrl: `${appBaseUrl}/traces`,
+          actionUrl: ctaUrl,
         });
         await resolvedDeps.recordProjectAlertDelivery({
           projectId,
@@ -1848,7 +2017,7 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
       try {
         await sendAlertEmail({
           to: alert_email,
-          subject: `Rifft weekly digest: ${regressions.length} regression${regressions.length === 1 ? "" : "s"} in ${projectName}`,
+          subject: digestSubject,
           html: emailHtml,
           text: emailText,
         });
@@ -1874,7 +2043,7 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
       }
     }
 
-    return { skipped: false, regressions: regressions.length, results };
+    return { skipped: false, regressions: regressions.length, traces: stats.traces_this_week, results };
   };
 
   const dispatchThresholdAlert = async (traceId: string) => {
@@ -1964,6 +2133,45 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
     const projectId = (request.params as { id: string }).id;
     const result = await dispatchRegressionDigest(projectId);
     return result;
+  });
+
+  // Batch endpoint: fire the weekly digest for every eligible Scale project.
+  // Call this once per week from a cron job or scheduler (e.g. Mondays at 9am).
+  app.post("/internal/weekly-digest", async (request, reply) => {
+    const internalSecret = process.env.INTERNAL_API_SECRET;
+    if (internalSecret) {
+      const provided = request.headers["x-internal-secret"];
+      if (provided !== internalSecret) {
+        reply.code(401);
+        return { error: "unauthorized" };
+      }
+    }
+
+    const projects = await resolvedDeps.getScaleProjectsWithDigestEnabled();
+    app.log.info({ count: projects.length }, "Starting weekly digest batch");
+
+    const results = await Promise.allSettled(
+      projects.map(async ({ project_id }) => {
+        try {
+          const result = await dispatchRegressionDigest(project_id);
+          return { project_id, ...result };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "unknown_error";
+          app.log.error({ project_id, error: message }, "Weekly digest failed for project");
+          return { project_id, skipped: true, reason: message };
+        }
+      }),
+    );
+
+    const summary = results.map((r) =>
+      r.status === "fulfilled" ? r.value : { project_id: "unknown", skipped: true, reason: "promise_rejected" },
+    );
+
+    const sent = summary.filter((r) => !r.skipped).length;
+    const skipped = summary.filter((r) => r.skipped).length;
+
+    app.log.info({ sent, skipped }, "Weekly digest batch complete");
+    return { ok: true, sent, skipped, projects: summary };
   });
 
   app.get("/projects/:id/members", async (request, reply) => {

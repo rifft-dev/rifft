@@ -356,19 +356,19 @@ export function AlertsCard({
             <div className="flex-1 space-y-1">
               <div className="flex items-center gap-2">
                 <TrendingUp className="h-3.5 w-3.5" />
-                <div className="text-sm font-medium">Weekly regression digest</div>
+                <div className="text-sm font-medium">Weekly digest</div>
                 <Badge variant={alerts.regression_available ? "default" : "outline"}>
                   Scale
                 </Badge>
               </div>
               <p className="text-sm text-muted-foreground">
-                Receive a weekly summary when a failure mode starts appearing significantly more
-                often than in the prior three weeks — before it becomes a pattern you have to hunt
-                down manually.
+                Every Monday, receive a summary of span volume, fatal failures, top agents by
+                activity, and any failure modes trending upward vs the prior three weeks — so you
+                catch regressions before they become patterns you have to hunt down manually.
               </p>
               {!alerts.regression_available ? (
                 <p className="text-xs text-muted-foreground/70">
-                  Upgrade to Cloud Scale to enable automatic regression detection.
+                  Upgrade to Cloud Scale to enable the weekly digest.
                 </p>
               ) : null}
             </div>
@@ -412,7 +412,11 @@ export function AlertsCard({
                       </Badge>
                       <span className="font-medium">
                         {delivery.channel === "slack" ? "Slack" : "Email"} ·{" "}
-                        {delivery.event_type === "test" ? "Test alert" : "Fatal failure"}
+                        {delivery.event_type === "test"
+                          ? "Test alert"
+                          : delivery.event_type === "regression_digest"
+                          ? "Weekly digest"
+                          : "Fatal failure"}
                       </span>
                     </div>
                     <div className="text-muted-foreground">
