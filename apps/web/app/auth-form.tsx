@@ -142,6 +142,17 @@ export function AuthForm({
               Get magic link
             </Button>
           </form>
+          <p className="text-xs text-muted-foreground">
+            By continuing, you acknowledge Rifft&apos;s{" "}
+            <a href="/privacy" className="underline underline-offset-2 hover:text-foreground transition-colors">
+              Privacy Policy
+            </a>{" "}
+            and{" "}
+            <a href="/terms" className="underline underline-offset-2 hover:text-foreground transition-colors">
+              Terms. 
+            </a>
+            .
+          </p>
         </div>
       </div>
 

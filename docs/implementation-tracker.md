@@ -315,8 +315,8 @@ Status keys:
 6. Finish README, docs, clean-machine quickstart testing, browser QA, and performance validation.
 
 Free50K/month $0
-Pro500K/month$29/month 
-Team2M/month$99/month
+Pro500K/month$49/month 
+Scale2M/month$149/month
 EnterpriseUnlimited$500+/month
 
 The Polar integration

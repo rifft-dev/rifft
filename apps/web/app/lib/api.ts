@@ -21,6 +21,7 @@ import type {
   AgentDetail,
   CloudProjectSummary,
   ForkDraft,
+  OptimizationSuggestionsResult,
   ProjectInsightsSummary,
   ProjectAlerts,
   TraceBaseline,
@@ -113,3 +114,11 @@ export const getAgentDetail = (traceId: string, agentId: string) =>
   fetchJson<AgentDetail>(`/traces/${traceId}/agents/${agentId}`);
 export const getForkDrafts = async (traceId: string) =>
   fetchJson<{ drafts: ForkDraft[] }>(`/traces/${traceId}/fork-drafts`);
+
+export const getOptimizationSuggestions = async (): Promise<OptimizationSuggestionsResult | null> => {
+  const projectId = await resolveActiveProjectId();
+  if (!projectId) return null;
+  return fetchJson<OptimizationSuggestionsResult>(
+    `/projects/${projectId}/optimization-suggestions`,
+  );
+};

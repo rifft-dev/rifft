@@ -49,6 +49,7 @@ import {
   detectRegressions,
   getWeeklyDigestStats,
   getScaleProjectsWithDigestEnabled,
+  getOptimizationSuggestions,
 } from "./queries.js";
 
 const port = Number(process.env.PORT ?? 4000);
@@ -505,6 +506,7 @@ type AppDeps = {
   detectRegressions: typeof detectRegressions;
   getWeeklyDigestStats: typeof getWeeklyDigestStats;
   getScaleProjectsWithDigestEnabled: typeof getScaleProjectsWithDigestEnabled;
+  getOptimizationSuggestions: typeof getOptimizationSuggestions;
   pgQuery: (query: string, params?: unknown[]) => Promise<unknown>;
 };
 
@@ -540,6 +542,7 @@ export const createApp = (
     detectRegressions,
     getWeeklyDigestStats,
     getScaleProjectsWithDigestEnabled,
+    getOptimizationSuggestions,
     pgQuery: pgPool.query.bind(pgPool),
     ...deps,
   };
@@ -554,15 +557,50 @@ export const createApp = (
     }
   });
 
-  app.get("/health", async () => ({
-    status: "ok",
-    service: "api",
-    dependencies: {
+  app.get("/health", async (_req, reply) => {
+    const checks = {
       postgresConfigured: databaseUrl.length > 0,
       clickhouseConfigured: clickhouseUrl.length > 0,
       supabaseConfigured: supabaseUrl.length > 0,
-    },
-  }));
+      clickhouseReachable: false as boolean,
+      postgresReachable: false as boolean,
+    };
+
+    // Probe ClickHouse with a trivial query (timeout 3 s)
+    if (clickhouseUrl) {
+      try {
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 3000);
+        const res = await fetch(clickhouseUrl, {
+          method: "POST",
+          body: "SELECT 1",
+          signal: ctrl.signal,
+        });
+        clearTimeout(tid);
+        checks.clickhouseReachable = res.ok;
+      } catch {
+        checks.clickhouseReachable = false;
+      }
+    }
+
+    // Probe Postgres with a trivial query (timeout 3 s)
+    if (databaseUrl) {
+      try {
+        await Promise.race([
+          pgPool.query("SELECT 1"),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 3000)),
+        ]);
+        checks.postgresReachable = true;
+      } catch {
+        checks.postgresReachable = false;
+      }
+    }
+
+    const degraded = checks.clickhouseConfigured && !checks.clickhouseReachable;
+    const status = degraded ? "degraded" : "ok";
+    reply.code(degraded ? 200 : 200); // always 200 so uptime monitors don't fire on degraded
+    return { status, service: "api", dependencies: checks };
+  });
 
   app.post("/webhooks/stripe", async (request, reply) => {
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
@@ -747,6 +785,31 @@ export const createApp = (
     ...project,
     is_primary_workspace: await isPrimaryWorkspace(projectId),
   };
+  });
+
+  // Scale-only: cost and latency optimisation suggestions
+  app.get("/projects/:id/optimization-suggestions", async (request, reply) => {
+    const projectId = (request.params as { id: string }).id;
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
+    if (!user) {
+      reply.code(401);
+      return { error: "unauthorized" };
+    }
+
+    const accessibleProject = await resolvedDeps.getAccessibleProject(user.id, projectId);
+    if (!accessibleProject) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+
+    const planKey = await resolvedDeps.getProjectPlanKey(projectId);
+    if (planKey !== "scale") {
+      reply.code(403);
+      return { error: "scale_plan_required" };
+    }
+
+    const result = await resolvedDeps.getOptimizationSuggestions(projectId);
+    return result;
   });
 
   app.get("/projects/:id/alerts", async (request, reply) => {
@@ -1733,13 +1796,21 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
     }
 
     const targets = (await resolvedDeps.pgQuery(
-      `SELECT slack_webhook_url, alert_email, name FROM projects WHERE id = $1 LIMIT 1`,
+      `SELECT slack_webhook_url, alert_email, name, created_at FROM projects WHERE id = $1 LIMIT 1`,
       [projectId],
-    )) as { rows: Array<{ slack_webhook_url: string | null; alert_email: string | null; name: string }>; rowCount: number | null };
+    )) as { rows: Array<{ slack_webhook_url: string | null; alert_email: string | null; name: string; created_at: string | Date }>; rowCount: number | null };
     if (!targets.rowCount || !targets.rows[0]) {
       return { skipped: true, reason: "project_not_found" };
     }
-    const { slack_webhook_url, alert_email, name: projectName } = targets.rows[0];
+    const { slack_webhook_url, alert_email, name: projectName, created_at } = targets.rows[0];
+
+    // Skip the digest for projects younger than 7 days — the first-week
+    // span/trace deltas are always 0/0 which looks broken to the reader.
+    const projectAgeMs = Date.now() - new Date(created_at).getTime();
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    if (projectAgeMs < sevenDaysMs) {
+      return { skipped: true, reason: "project_too_new" };
+    }
 
     if (!slack_webhook_url && !alert_email) {
       return { skipped: true, reason: "no_destination" };
@@ -2131,6 +2202,11 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
     }
 
     const projectId = (request.params as { id: string }).id;
+    const planKey = await resolvedDeps.getProjectPlanKey(projectId);
+    if (planKey !== "scale") {
+      reply.code(403);
+      return { error: "scale_plan_required" };
+    }
     const result = await dispatchRegressionDigest(projectId);
     return result;
   });

@@ -498,7 +498,7 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
                   <div className="font-medium">Pro</div>
                   <div className="text-sm text-muted-foreground">Multiple workspaces, longer retention, email support.</div>
                 </div>
-                <div className="text-sm font-medium">$29/mo</div>
+                <div className="text-sm font-medium">$49/mo</div>
               </div>
               <Button
                 type="button"
@@ -524,7 +524,7 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
                   <div className="font-medium">Scale</div>
                   <div className="text-sm text-muted-foreground">Higher volume, 1-year retention, priority support.</div>
                 </div>
-                <div className="text-sm font-medium">$99/mo</div>
+                <div className="text-sm font-medium">$149/mo</div>
               </div>
               <Button
                 type="button"

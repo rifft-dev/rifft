@@ -39,9 +39,10 @@ const pricingCards = [
     title: "Free",
     amount: "$0 / month",
     features: [
-      "50k spans/mo",
-      "7-day retention",
-      "1 workspace",
+      "50K spans/month",
+      "14-day retention",
+      "Causal graph and MAST classification",
+      "One workspace",
     ],
     cta: "Start free",
     featured: false,
@@ -50,12 +51,17 @@ const pricingCards = [
     key: "pro" as const,
     eyebrow: "Cloud Pro",
     title: "Pro",
-    amount: "$29 / month",
+    amount: "$49 / month",
     features: [
-      "500k spans",
+      "500K spans/month",
       "90-day retention",
+      "Fork mode and replay",
+      "Unlimited team members",
       "Unlimited workspaces",
-      "SSO",
+      "Email support",
+      "Slack and email alerts",
+      "Natural language failure explanations",
+      "Shareable incident links",
     ],
     cta: "Start with Pro",
     featured: true,
@@ -64,12 +70,16 @@ const pricingCards = [
     key: "scale" as const,
     eyebrow: "Cloud Scale",
     title: "Scale",
-    amount: "$99 / month",
+    amount: "$149 / month",
     features: [
-      "2M spans",
+      "2M spans/month",
       "1-year retention",
-      "Unlimited workspaces",
+      "Everything in Pro",
+      "Automatic regression detection",
+      "Weekly digest reports",
+      "Cost and latency optimisation suggestions",
       "Priority support",
+      "$5 per 100K spans above 2M",
     ],
     cta: "Get started",
     featured: false,
@@ -103,13 +113,13 @@ export default async function HomePage({
       {
         "@type": "Offer",
         name: "Cloud Pro",
-        price: "29",
+        price: "49",
         priceCurrency: "USD",
       },
       {
         "@type": "Offer",
         name: "Cloud Scale",
-        price: "99",
+        price: "149",
         priceCurrency: "USD",
       },
     ],
@@ -494,8 +504,8 @@ export default async function HomePage({
               <div className="space-y-3">
                 <div className="text-sm font-medium text-foreground">Legal</div>
                 <div className="space-y-2 text-sm text-muted-foreground">
-                  <div>Privacy</div>
-                  <div>Terms</div>
+                  <div><Link href="/privacy" className="hover:text-foreground transition-colors">Privacy</Link></div>
+                  <div><Link href="/terms" className="hover:text-foreground transition-colors">Terms</Link></div>
                   <div>Security</div>
                   <div>DPA</div>
                 </div>

@@ -8,25 +8,33 @@ import { Button } from "@/components/ui/button";
 const PLANS = {
   pro: {
     name: "Cloud Pro",
-    price: "$29/month",
+    price: "$49/month",
     planKey: "pro",
     features: [
       "500K spans/month",
       "90-day retention",
-      "Fork mode",
+      "Fork mode and replay",
       "Unlimited team members",
+      "Unlimited workspaces",
+      "Slack and email alerts",
+      "Natural language failure explanations",
+      "Shareable incident links",
       "Email support",
     ],
   },
   scale: {
     name: "Cloud Scale",
-    price: "$99/month",
+    price: "$149/month",
     planKey: "scale",
     features: [
       "2M spans/month",
       "1-year retention",
       "Everything in Pro",
+      "Automatic regression detection",
+      "Weekly digest reports",
+      "Cost and latency optimisation suggestions",
       "Priority support",
+      "$5 per 100K spans above 2M",
     ],
   },
 } as const;

@@ -22,7 +22,7 @@ Rifft will have three visible paths:
 
 - Self-hosted: free forever
 - Cloud Free: `50K spans/month`, `14-day retention`
-- Cloud Pro: `$29/month`, `500K spans/month`, `90-day retention`, `$5 per 100K` spans above `500K`
+- Cloud Pro: `$49/month`, `500K spans/month`, `90-day retention`, `$5 per 100K` spans above `500K`
 
 Initial cloud positioning:
 
@@ -255,7 +255,7 @@ without forcing a schema rewrite.
 
 ### Cloud Pro
 
-- `$29/month`
+- `$49/month`
 - `500K spans/month`
 - `90-day retention`
 - email support
@@ -346,7 +346,7 @@ Retention must be enforced with a scheduled cleanup job.
 
 ### Rules
 
-- Free: delete trace data older than `7 days`
+- Free: delete trace data older than `14 days`
 - Pro: delete trace data older than `90 days`
 
 ### Requirements

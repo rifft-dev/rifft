@@ -350,3 +350,25 @@ export type ForkDraft = {
   created_at: string;
   updated_at: string;
 };
+
+export type OptimizationSuggestionType =
+  | "cost_dominant_agent"
+  | "latency_bottleneck"
+  | "model_downgrade";
+
+export type OptimizationSuggestion = {
+  id: string;
+  type: OptimizationSuggestionType;
+  severity: "high" | "medium";
+  title: string;
+  explanation: string;
+  estimated_saving: string | null;
+  agent_id: string | null;
+  traces_analyzed: number;
+};
+
+export type OptimizationSuggestionsResult = {
+  suggestions: OptimizationSuggestion[];
+  traces_analyzed: number;
+  days_analyzed: number;
+};

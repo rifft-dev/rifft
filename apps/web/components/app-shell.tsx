@@ -6,6 +6,8 @@ import { Menu } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AppSidebar } from "@/components/app-sidebar";
 import { RifftLogo } from "@/components/rifft-logo";
+import { StatusBanner } from "@/components/status-banner";
+import { PaymentBanner } from "@/components/payment-banner";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useAuth } from "@/components/auth-provider";
@@ -65,6 +67,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isBootstrapRoute = pathname.startsWith("/bootstrap");
   const isDocsRoute = pathname.startsWith("/docs");
   const isBlogRoute = pathname.startsWith("/blog");
+  const isLegalRoute = pathname.startsWith("/privacy") || pathname.startsWith("/terms");
   const isPublicLandingRoute = pathname === "/";
   const nextPath = searchParams.get("next") ?? defaultAuthedRoute;
   const mobileRouteLabel = getMobileRouteLabel(pathname);
@@ -114,7 +117,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (!isAuthRoute && !isBootstrapRoute && !isPublicLandingRoute && !isDocsRoute && !isBlogRoute) {
+    if (!isAuthRoute && !isBootstrapRoute && !isPublicLandingRoute && !isDocsRoute && !isBlogRoute && !isLegalRoute) {
       const target = pathname === "/" ? defaultAuthedRoute : pathname;
       router.replace(`/auth?next=${encodeURIComponent(target)}`);
     }
@@ -123,6 +126,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     isBlogRoute,
     isBootstrapRoute,
     isDocsRoute,
+    isLegalRoute,
     isLoading,
     isPublicLandingRoute,
     nextPath,
@@ -131,7 +135,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     user,
   ]);
 
-  if (isAuthRoute || isBootstrapRoute || isPublicLandingRoute || isDocsRoute || isBlogRoute) {
+  if (isAuthRoute || isBootstrapRoute || isPublicLandingRoute || isDocsRoute || isBlogRoute || isLegalRoute) {
     return <div className="min-h-screen bg-background">{children}</div>;
   }
 
@@ -150,6 +154,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background">
+      <PaymentBanner />
+      <StatusBanner />
       <div className="flex min-h-screen flex-col lg:flex-row">
         <AppSidebar />
         <div className="sticky top-0 z-30 border-b border-border/80 bg-background/95 backdrop-blur lg:hidden">

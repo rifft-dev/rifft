@@ -3405,6 +3405,224 @@ export const createIncidentShare = async (
   return token;
 };
 
+// ─── Cost and latency optimisation suggestions (Scale plan) ──────────────────
+
+export type OptimizationSuggestionType =
+  | "cost_dominant_agent"
+  | "latency_bottleneck"
+  | "model_downgrade";
+
+export type OptimizationSuggestion = {
+  /** Stable ID — safe to use as a React key */
+  id: string;
+  type: OptimizationSuggestionType;
+  severity: "high" | "medium";
+  title: string;
+  explanation: string;
+  /** Human-readable estimate, e.g. "~40% reduction in total project cost" */
+  estimated_saving: string | null;
+  /** The primary agent this suggestion is about, if applicable */
+  agent_id: string | null;
+  traces_analyzed: number;
+};
+
+export type OptimizationSuggestionsResult = {
+  suggestions: OptimizationSuggestion[];
+  traces_analyzed: number;
+  days_analyzed: number;
+};
+
+type AgentAggRow = {
+  agent_id: string;
+  span_count: string;
+  total_cost_usd: string;
+  total_duration_ms: string;
+  total_input_tokens: string;
+  total_output_tokens: string;
+};
+
+export const getOptimizationSuggestions = async (
+  projectId: string,
+): Promise<OptimizationSuggestionsResult> => {
+  const windowDays = 30;
+  const cutoff = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+  const fmtDateTime = (d: Date) => d.toISOString().slice(0, 19).replace("T", " ");
+
+  // Trace count from Postgres (authoritative for what the user has seen)
+  const traceResult = await pgPool.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM traces WHERE project_id = $1 AND started_at >= $2`,
+    [projectId, cutoff.toISOString()],
+  );
+  const traceCount = Number(traceResult.rows[0]?.count ?? 0);
+
+  if (traceCount < 3) {
+    return { suggestions: [], traces_analyzed: traceCount, days_analyzed: windowDays };
+  }
+
+  // Per-agent aggregates from ClickHouse.
+  // cost_usd and llm.cost_usd are mutually exclusive per span (only one will be non-zero),
+  // so summing both is safe. Same for the token variants.
+  const agentRows = await queryClickHouse<AgentAggRow>(
+    `
+    SELECT
+      agent_id,
+      COUNT(*)                                                            AS span_count,
+      SUM(duration_ms)                                                    AS total_duration_ms,
+      SUM(
+        simpleJSONExtractFloat(attributes, 'cost_usd') +
+        simpleJSONExtractFloat(attributes, 'llm.cost_usd')
+      )                                                                   AS total_cost_usd,
+      SUM(
+        simpleJSONExtractUInt(attributes, 'llm.input_tokens') +
+        simpleJSONExtractUInt(attributes, 'prompt_tokens')  +
+        simpleJSONExtractUInt(attributes, 'input_tokens')
+      )                                                                   AS total_input_tokens,
+      SUM(
+        simpleJSONExtractUInt(attributes, 'llm.output_tokens') +
+        simpleJSONExtractUInt(attributes, 'completion_tokens') +
+        simpleJSONExtractUInt(attributes, 'output_tokens')
+      )                                                                   AS total_output_tokens
+    FROM rifft.spans
+    WHERE project_id = '${escapeValue(projectId)}'
+      AND agent_id != ''
+      AND start_time >= toDateTime('${fmtDateTime(cutoff)}')
+    GROUP BY agent_id
+    HAVING total_cost_usd > 0 OR total_duration_ms > 0
+    ORDER BY total_cost_usd DESC
+    `,
+  ).catch(() => [] as AgentAggRow[]);
+
+  if (agentRows.length === 0) {
+    return { suggestions: [], traces_analyzed: traceCount, days_analyzed: windowDays };
+  }
+
+  const totalCost = agentRows.reduce((s, r) => s + Number(r.total_cost_usd), 0);
+  const totalDuration = agentRows.reduce((s, r) => s + Number(r.total_duration_ms), 0);
+
+  const pct = (n: number, total: number) =>
+    total > 0 ? Math.round((n / total) * 100) : 0;
+  const fmtCost = (usd: number) =>
+    usd < 0.001 ? `$${(usd * 1000).toFixed(2)}m` : `$${usd.toFixed(3)}`;
+  const fmtSec = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+
+  const suggestions: OptimizationSuggestion[] = [];
+
+  // ── 1. Cost-dominant agent ─────────────────────────────────────────────────
+  if (totalCost > 0) {
+    const top = agentRows[0];
+    if (top) {
+      const share = pct(Number(top.total_cost_usd), totalCost);
+
+      if (share >= 50) {
+        const inputTok = Number(top.total_input_tokens);
+        const outputTok = Number(top.total_output_tokens);
+        const outputRatio = inputTok > 50 ? outputTok / inputTok : null;
+        const costStr = fmtCost(Number(top.total_cost_usd));
+
+        let explanation =
+          `The ${top.agent_id} agent accounts for ${share}% of total LLM cost across ` +
+          `the last ${traceCount} traces (${costStr} total).`;
+
+        let estimatedSaving: string | null = null;
+
+        if (outputRatio !== null && outputRatio > 2.0) {
+          explanation +=
+            ` Its output-to-input token ratio is ${outputRatio.toFixed(1)}x — it generates ` +
+            `significantly more than it reads. Generation-heavy agents are strong candidates for ` +
+            `a smaller, faster model on their drafting step, where the quality difference is ` +
+            `often negligible. Switching the draft step alone could reduce this agent's cost by 60–80%.`;
+          estimatedSaving = `~${Math.round(share * 0.55)}% reduction in total project cost`;
+        } else {
+          explanation +=
+            ` Review whether this agent's task justifies a frontier model, or whether a ` +
+            `smaller model with a tighter prompt could deliver the same output.`;
+          estimatedSaving = `~${Math.round(share * 0.4)}% reduction in total project cost`;
+        }
+
+        suggestions.push({
+          id: `cost_dominant_agent:${top.agent_id}`,
+          type: "cost_dominant_agent",
+          severity: share >= 70 ? "high" : "medium",
+          title: `${top.agent_id} accounts for ${share}% of total cost`,
+          explanation,
+          estimated_saving: estimatedSaving,
+          agent_id: top.agent_id,
+          traces_analyzed: traceCount,
+        });
+      }
+    }
+  }
+
+  // ── 2. Latency bottleneck ──────────────────────────────────────────────────
+  if (totalDuration > 0) {
+    const byDuration = [...agentRows].sort(
+      (a, b) => Number(b.total_duration_ms) - Number(a.total_duration_ms),
+    );
+    const top = byDuration[0];
+    if (top) {
+      const share = pct(Number(top.total_duration_ms), totalDuration);
+
+      if (share >= 60) {
+        const avgMs = Math.round(Number(top.total_duration_ms) / Number(top.span_count));
+        suggestions.push({
+          id: `latency_bottleneck:${top.agent_id}`,
+          type: "latency_bottleneck",
+          severity: share >= 75 ? "high" : "medium",
+          title: `${top.agent_id} accounts for ${share}% of total trace time`,
+          explanation:
+            `The ${top.agent_id} agent accounts for ${share}% of total trace duration across ` +
+            `the last ${traceCount} traces, averaging ${fmtSec(avgMs)} per call. ` +
+            `If downstream agents don't depend on its full output, moving work out of this ` +
+            `agent's critical path — or parallelising independent steps — could substantially ` +
+            `reduce end-to-end latency.`,
+          estimated_saving: null,
+          agent_id: top.agent_id,
+          traces_analyzed: traceCount,
+        });
+      }
+    }
+  }
+
+  // ── 3. Model-downgrade candidate (high output ratio, not already flagged) ──
+  const flaggedAgents = new Set(suggestions.map((s) => s.agent_id).filter(Boolean));
+
+  for (const row of agentRows.slice(0, 6)) {
+    if (flaggedAgents.has(row.agent_id)) continue;
+
+    const inputTok = Number(row.total_input_tokens);
+    const outputTok = Number(row.total_output_tokens);
+    if (inputTok < 100) continue; // not enough LLM signal
+
+    const ratio = outputTok / inputTok;
+    const share = pct(Number(row.total_cost_usd), totalCost);
+
+    if (ratio >= 3.0 && share >= 15) {
+      suggestions.push({
+        id: `model_downgrade:${row.agent_id}`,
+        type: "model_downgrade",
+        severity: "medium",
+        title: `${row.agent_id} has a ${ratio.toFixed(1)}x output-to-input ratio`,
+        explanation:
+          `The ${row.agent_id} agent generates ${ratio.toFixed(1)} tokens of output for every ` +
+          `token of input (${share}% of total project cost). ` +
+          `Generation-heavy agents are typically good candidates for a smaller, faster model on ` +
+          `their drafting step — quality differences for long-form generation are often negligible ` +
+          `while cost differences can be 60–80%.`,
+        estimated_saving: `~${Math.round(share * 0.6)}% reduction in total project cost`,
+        agent_id: row.agent_id,
+        traces_analyzed: traceCount,
+      });
+      break; // one model-downgrade suggestion is enough
+    }
+  }
+
+  return {
+    suggestions: suggestions.slice(0, 4),
+    traces_analyzed: traceCount,
+    days_analyzed: windowDays,
+  };
+};
+
 // ─── Weekly digest ───────────────────────────────────────────────────────────
 
 export type WeeklyDigestStats = {
