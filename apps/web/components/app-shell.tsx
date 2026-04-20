@@ -64,6 +64,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isAuthRoute = pathname.startsWith("/auth");
   const isBootstrapRoute = pathname.startsWith("/bootstrap");
   const isDocsRoute = pathname.startsWith("/docs");
+  const isBlogRoute = pathname.startsWith("/blog");
   const isPublicLandingRoute = pathname === "/";
   const nextPath = searchParams.get("next") ?? defaultAuthedRoute;
   const mobileRouteLabel = getMobileRouteLabel(pathname);
@@ -113,12 +114,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (!isAuthRoute && !isBootstrapRoute && !isPublicLandingRoute && !isDocsRoute) {
+    if (!isAuthRoute && !isBootstrapRoute && !isPublicLandingRoute && !isDocsRoute && !isBlogRoute) {
       const target = pathname === "/" ? defaultAuthedRoute : pathname;
       router.replace(`/auth?next=${encodeURIComponent(target)}`);
     }
   }, [
     isAuthRoute,
+    isBlogRoute,
     isBootstrapRoute,
     isDocsRoute,
     isLoading,
@@ -129,7 +131,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     user,
   ]);
 
-  if (isAuthRoute || isBootstrapRoute || isPublicLandingRoute || isDocsRoute) {
+  if (isAuthRoute || isBootstrapRoute || isPublicLandingRoute || isDocsRoute || isBlogRoute) {
     return <div className="min-h-screen bg-background">{children}</div>;
   }
 

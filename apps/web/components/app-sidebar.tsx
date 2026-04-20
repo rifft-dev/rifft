@@ -232,7 +232,8 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
                   } else if (canCreateWorkspace) {
                     setNewWorkspaceOpen(true);
                   } else {
-                    setUpgradeOpen(true);
+                    router.push("/settings");
+                    closeMobileNav();
                   }
                   return;
                 }

@@ -22,6 +22,35 @@ const formatSignedNumber = (value: number, unit = "") => {
   return `${prefix}${value}${unit}`;
 };
 
+const fallbackAgentDetail = (
+  trace: Awaited<ReturnType<typeof getTraceSnapshot>>["trace"],
+  graph: Awaited<ReturnType<typeof getTraceSnapshot>>["graph"],
+  agentId: string,
+) => {
+  const node = graph.nodes.find((candidate) => candidate.id === agentId);
+  const framework = node?.framework ?? trace.framework[0] ?? "unknown";
+  const status = node?.status ?? "unset";
+  const totalCostUsd = node?.cost_usd ?? 0;
+  const totalDurationMs = node?.duration_ms ?? 0;
+
+  return {
+    summary: {
+      agent_id: agentId,
+      framework,
+      status,
+      total_cost_usd: totalCostUsd,
+      total_duration_ms: totalDurationMs,
+    },
+    messages: [],
+    tool_calls: [],
+    mast_failures: trace.mast_failures.filter((failure) => failure.agent_id === agentId),
+    decision_context: {
+      unavailable: true,
+      reason: "agent_detail_unavailable",
+    },
+  };
+};
+
 export default async function TraceDetailPage({
   params,
 }: {
@@ -30,19 +59,44 @@ export default async function TraceDetailPage({
   const { traceId } = await params;
 
   try {
-   const [snapshot, comparisonResponse, forkDrafts, baselineResponse, projectSettings] = await Promise.all([
-  getTraceSnapshot(traceId),
-  getTraceComparison(traceId),
-  getForkDrafts(traceId),
-  getProjectBaseline(),
-  getProjectSettings(),
-]);
+    const snapshot = await getTraceSnapshot(traceId);
+    const ancillaryResults = await Promise.allSettled([
+      getTraceComparison(traceId),
+      getForkDrafts(traceId),
+      getProjectBaseline(),
+      getProjectSettings(),
+    ]);
     const { trace, graph, timeline } = snapshot;
+    const [comparisonResult, forkDraftsResult, baselineResult, projectSettingsResult] = ancillaryResults;
+    const comparisonResponse =
+      comparisonResult.status === "fulfilled" ? comparisonResult.value : { comparison: null };
+    const forkDrafts =
+      forkDraftsResult.status === "fulfilled" ? forkDraftsResult.value : { drafts: [] };
+    const baselineResponse =
+      baselineResult.status === "fulfilled" ? baselineResult.value : { baseline: null };
+    const projectSettings =
+      projectSettingsResult.status === "fulfilled"
+        ? projectSettingsResult.value
+        : {
+            permissions: {
+              can_update_settings: false,
+            },
+          };
+    const partialFailures = ancillaryResults.filter((result) => result.status === "rejected").length;
     const agentDetails = await Promise.all(
-      graph.nodes.map(async (node) => ({
-        agentId: node.id,
-        detail: await getAgentDetail(traceId, node.id),
-      })),
+      graph.nodes.map(async (node) => {
+        try {
+          return {
+            agentId: node.id,
+            detail: await getAgentDetail(traceId, node.id),
+          };
+        } catch {
+          return {
+            agentId: node.id,
+            detail: fallbackAgentDetail(trace, graph, node.id),
+          };
+        }
+      }),
     );
     const rootCauseAgent = trace.causal_attribution.root_cause_agent_id ?? "Not inferred";
     const failingAgent = trace.causal_attribution.failing_agent_id ?? "Not inferred";
@@ -120,6 +174,11 @@ export default async function TraceDetailPage({
               ) : null}
             </div>
           </div>
+          {partialFailures > 0 ? (
+            <div className="mt-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-muted-foreground">
+              Some comparison or workspace metadata could not be loaded, so Rifft is showing the trace with partial context instead of failing the whole page.
+            </div>
+          ) : null}
           {comparisonData ? (
             <div className="mt-6 rounded-3xl border bg-muted/20 p-5">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">

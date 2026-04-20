@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, Clock3 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 import { PublicNav } from "@/components/public-nav";
 import { getBlogPost, blogPosts } from "@/lib/blog";
 import { siteName, siteUrl } from "@/lib/seo";
@@ -12,7 +14,23 @@ type BlogPageProps = {
 };
 
 const prose =
-  "prose prose-neutral max-w-none dark:prose-invert prose-headings:scroll-mt-24 prose-pre:overflow-x-auto prose-pre:rounded-2xl prose-pre:border prose-pre:bg-muted/30 prose-pre:p-4";
+  "prose prose-neutral max-w-none text-[19px] dark:prose-invert prose-headings:scroll-mt-24 prose-headings:font-semibold prose-headings:tracking-tight prose-h2:mt-16 prose-h2:mb-5 prose-h2:text-[1.9rem] prose-h3:mt-10 prose-h3:mb-4 prose-h3:text-[1.3rem] prose-p:my-6 prose-p:text-foreground/92 prose-p:leading-[1.9] prose-li:my-2 prose-li:leading-[1.85] prose-ul:my-6 prose-ol:my-6 prose-strong:text-foreground prose-a:text-foreground prose-a:decoration-border prose-a:underline-offset-4 hover:prose-a:text-foreground prose-code:rounded prose-code:bg-muted/70 prose-code:px-1 prose-code:py-0.5 prose-code:font-medium prose-code:text-foreground prose-code:before:content-none prose-code:after:content-none prose-pre:my-8 prose-pre:overflow-x-auto prose-pre:rounded-[1.25rem] prose-pre:border prose-pre:border-border/70 prose-pre:bg-[#111111] prose-pre:p-5 prose-pre:text-[14px] prose-blockquote:border-l-border prose-blockquote:text-foreground/80";
+
+function formatPublishedDate(value: string) {
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date(value));
+}
+
+function ArticleH2({ id, children }: { id: string; children: React.ReactNode }) {
+  return <h2 id={id}>{children}</h2>;
+}
+
+function ArticleH3({ id, children }: { id: string; children: React.ReactNode }) {
+  return <h3 id={id}>{children}</h3>;
+}
 
 export async function generateStaticParams() {
   return blogPosts.map((post) => ({ slug: post.slug }));
@@ -56,7 +74,7 @@ function CrewAIDebugPost() {
         <li>What changed between a healthy run and the failed one?</li>
         <li>What is the smallest point in the pipeline where you can test a fix?</li>
       </ol>
-      <h2>Example failure</h2>
+      <ArticleH2 id="example-failure">Example failure</ArticleH2>
       <p>
         Imagine a three-agent CrewAI pipeline:
       </p>
@@ -71,7 +89,7 @@ function CrewAIDebugPost() {
         earlier: the <strong>Researcher</strong> may have sent incomplete notes or an unchecked
         answer to the Writer, which then amplified the mistake.
       </p>
-      <h2>Step 1: confirm the visible failure</h2>
+      <ArticleH2 id="confirm-the-visible-failure">Step 1: confirm the visible failure</ArticleH2>
       <p>
         Start with the failing trace and verify what actually went wrong:
       </p>
@@ -85,7 +103,7 @@ function CrewAIDebugPost() {
         the inferred root cause agent, and the handoff path through the run. This is useful because
         CrewAI failures often look like “the last agent failed” when the real issue started earlier.
       </p>
-      <h2>Step 2: inspect the handoff, not just the final agent</h2>
+      <ArticleH2 id="inspect-the-handoff">Step 2: inspect the handoff, not just the final agent</ArticleH2>
       <p>
         In multi-agent systems, bad state usually spreads through messages. That means the fastest
         useful question is: <em>what did the upstream agent actually send?</em>
@@ -103,7 +121,7 @@ function CrewAIDebugPost() {
         but is missing citations or the exact structured fields the next agent expects. The writer
         then produces a polished but incorrect answer.
       </p>
-      <h2>Step 3: classify the failure mode</h2>
+      <ArticleH2 id="classify-the-failure-mode">Step 3: classify the failure mode</ArticleH2>
       <p>
         Once you see the bad handoff, classify the failure in plain language. Useful categories are:
       </p>
@@ -117,7 +135,7 @@ function CrewAIDebugPost() {
         Rifft maps failures into MAST-style categories so you can tell whether this is a one-off
         bug or a recurring pattern across traces.
       </p>
-      <h2>Step 4: compare against a healthy baseline</h2>
+      <ArticleH2 id="compare-against-a-baseline">Step 4: compare against a healthy baseline</ArticleH2>
       <p>
         If you have a healthy trace from the same workflow, mark it as your baseline. Then compare
         the failing run against it:
@@ -131,7 +149,7 @@ function CrewAIDebugPost() {
         This step matters because CrewAI failures often show up after a prompt tweak, tool change,
         or role definition change that looks harmless in code review.
       </p>
-      <h2>Step 5: test the smallest possible fix</h2>
+      <ArticleH2 id="test-the-smallest-fix">Step 5: test the smallest possible fix</ArticleH2>
       <p>
         Do not restart the whole mental model from scratch. Save a draft from the failing handoff
         and change only the message payload you suspect is wrong. That gives you a precise fix
@@ -152,7 +170,7 @@ Edited draft:
         Then rerun the pipeline with that adjusted handoff and open the new trace. If the failure
         disappears, you have isolated the real defect instead of just patching symptoms.
       </p>
-      <h2>Checklist for debugging CrewAI failures</h2>
+      <ArticleH2 id="crewai-debugging-checklist">Checklist for debugging CrewAI failures</ArticleH2>
       <ul>
         <li>Start with the failing trace, not the prompt file.</li>
         <li>Check the handoff that fed the failing agent.</li>
@@ -176,12 +194,12 @@ function CrewAIVsAutoGenPost() {
         exactly the same way, and the debugging workflow changes depending on which framework you
         use.
       </p>
-      <h2>The debugging difference in one sentence</h2>
+      <ArticleH2 id="debugging-difference">The debugging difference in one sentence</ArticleH2>
       <p>
         <strong>CrewAI</strong> failures are often role-and-handoff problems. <strong>AutoGen</strong>{" "}
         failures are often conversation-loop, tool-execution, or termination-condition problems.
       </p>
-      <h2>What typically breaks in CrewAI</h2>
+      <ArticleH2 id="what-breaks-in-crewai">What typically breaks in CrewAI</ArticleH2>
       <ul>
         <li>One agent hands off incomplete context to the next.</li>
         <li>Role prompts drift, so an agent returns the wrong shape of answer.</li>
@@ -192,7 +210,7 @@ function CrewAIVsAutoGenPost() {
         That means CrewAI debugging is usually about tracing the failure backwards through handoffs
         and comparing the bad run with a healthy one.
       </p>
-      <h2>What typically breaks in AutoGen</h2>
+      <ArticleH2 id="what-breaks-in-autogen">What typically breaks in AutoGen</ArticleH2>
       <ul>
         <li>Agents loop too long before termination.</li>
         <li>Tool calls succeed syntactically but produce unusable outputs.</li>
@@ -203,7 +221,7 @@ function CrewAIVsAutoGenPost() {
         AutoGen debugging often starts from the conversation timeline and tool invocation sequence
         rather than just a single bad handoff.
       </p>
-      <h2>How the failure feels in practice</h2>
+      <ArticleH2 id="how-the-failure-feels">How the failure feels in practice</ArticleH2>
       <p>
         In CrewAI, you often ask: <em>which agent gave the next agent the wrong thing?</em>
       </p>
@@ -211,22 +229,22 @@ function CrewAIVsAutoGenPost() {
         In AutoGen, you often ask: <em>why did this conversation keep going, stop too early, or
         produce a tool result nobody validated?</em>
       </p>
-      <h2>What to inspect first</h2>
-      <h3>CrewAI</h3>
+      <ArticleH2 id="what-to-inspect-first">What to inspect first</ArticleH2>
+      <ArticleH3 id="what-to-inspect-first-crewai">CrewAI</ArticleH3>
       <ol>
         <li>Open the failing trace.</li>
         <li>Inspect the handoff into the failing agent.</li>
         <li>Check whether the payload structure drifted.</li>
         <li>Compare to a healthy baseline.</li>
       </ol>
-      <h3>AutoGen</h3>
+      <ArticleH3 id="what-to-inspect-first-autogen">AutoGen</ArticleH3>
       <ol>
         <li>Open the full conversation timeline.</li>
         <li>Check tool-call results and follow-up turns.</li>
         <li>Inspect stop conditions and retry behavior.</li>
         <li>Look for message explosion or circular reasoning.</li>
       </ol>
-      <h2>Why this matters for tooling</h2>
+      <ArticleH2 id="why-this-matters-for-tooling">Why this matters for tooling</ArticleH2>
       <p>
         If your framework mostly fails through message propagation, you need strong handoff
         inspection and root-cause attribution. If your framework mostly fails through long
@@ -237,7 +255,7 @@ function CrewAIVsAutoGenPost() {
         “which handoff carried the bad state forward?” That tends to be especially useful in CrewAI
         and handoff-heavy AutoGen systems.
       </p>
-      <h2>Practical recommendation</h2>
+      <ArticleH2 id="practical-recommendation">Practical recommendation</ArticleH2>
       <ul>
         <li>If your agents pass structured work between roles, prioritize handoff inspection.</li>
         <li>If your agents negotiate in long conversations, prioritize timeline inspection.</li>
@@ -259,7 +277,7 @@ function HandoffFailuresPost() {
         look like downstream failures. The visible error appears in the receiving agent, but the
         actual defect began when another agent sent the wrong state forward.
       </p>
-      <h2>What is a handoff failure?</h2>
+      <ArticleH2 id="what-is-a-handoff-failure">What is a handoff failure?</ArticleH2>
       <p>
         A handoff failure happens when one agent passes a message, payload, or decision artifact to
         another agent, and that transfer is incomplete, malformed, misleading, or silently wrong.
@@ -271,7 +289,7 @@ function HandoffFailuresPost() {
         <li>a researcher forwards an unverified answer as if it were trusted</li>
         <li>a tool result is passed along without error context</li>
       </ul>
-      <h2>Why handoff failures are dangerous</h2>
+      <ArticleH2 id="why-handoff-failures-are-dangerous">Why handoff failures are dangerous</ArticleH2>
       <p>
         They create cascades. One bad handoff can make multiple downstream agents appear broken even
         though they were behaving consistently with the state they received.
@@ -280,7 +298,7 @@ function HandoffFailuresPost() {
         That is why root-cause attribution matters. If you only inspect the final error, you often
         fix the wrong prompt or the wrong agent.
       </p>
-      <h2>A useful classification model</h2>
+      <ArticleH2 id="classification-model">A useful classification model</ArticleH2>
       <p>
         You do not need a huge taxonomy to start, but systematic debugging gets much easier if you
         classify failures consistently. A useful MAST-style view includes:
@@ -292,7 +310,7 @@ function HandoffFailuresPost() {
         <li><strong>Context overflow</strong>: the handoff is so large that key details are lost.</li>
         <li><strong>Termination mismatch</strong>: upstream agent signals completion too early.</li>
       </ul>
-      <h2>How to debug handoff failures</h2>
+      <ArticleH2 id="debug-handoff-failures">How to debug handoff failures</ArticleH2>
       <ol>
         <li>Find the first downstream agent that visibly misbehaves.</li>
         <li>Inspect the exact payload it received.</li>
@@ -304,7 +322,7 @@ function HandoffFailuresPost() {
         This is where a trace view with communication edges helps. You want to see the handoff as a
         first-class debugging object, not just a buried log line.
       </p>
-      <h2>What a healthy handoff looks like</h2>
+      <ArticleH2 id="healthy-handoff">What a healthy handoff looks like</ArticleH2>
       <ul>
         <li>clear ownership of who produced it</li>
         <li>predictable schema</li>
@@ -312,7 +330,7 @@ function HandoffFailuresPost() {
         <li>enough context for the next agent to act safely</li>
         <li>explicit uncertainty when the output is provisional</li>
       </ul>
-      <h2>What to do once you find one</h2>
+      <ArticleH2 id="what-to-do-once-you-find-one">What to do once you find one</ArticleH2>
       <p>
         Resist the urge to rewrite the whole pipeline. First test the smallest intervention:
       </p>
@@ -326,7 +344,7 @@ function HandoffFailuresPost() {
         Then compare the new run against a healthy baseline and confirm that the root cause and
         failure mode changed the way you expected.
       </p>
-      <h2>Why systematic classification helps</h2>
+      <ArticleH2 id="why-systematic-classification-helps">Why systematic classification helps</ArticleH2>
       <p>
         Teams often debug handoff failures as isolated incidents. Over time, that hides the real
         pattern. If you classify failures the same way across traces, you can answer better
@@ -370,36 +388,117 @@ export default async function BlogPostPage({ params }: BlogPageProps) {
     notFound();
   }
 
+  const relatedPosts = blogPosts.filter((candidate) => candidate.slug !== slug).slice(0, 2);
+
   return (
-    <div className="min-h-screen bg-background px-6 py-6 lg:px-8">
-      <div className="mx-auto max-w-5xl space-y-10">
+    <div className="min-h-screen bg-background px-6 py-8 lg:px-8 lg:py-10">
+      <div className="mx-auto max-w-[1200px] space-y-10">
         <PublicNav badge="Blog" />
 
-        <article className="mx-auto max-w-3xl space-y-8">
-        <Link
-          href="/blog"
-          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to blog
-        </Link>
+        <article className="mx-auto max-w-3xl space-y-10">
+            <Link
+              href="/blog"
+              className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to blog
+            </Link>
 
-        <header className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            <Badge variant="outline">Blog</Badge>
-            <span>{post.publishedAt}</span>
-            <span>·</span>
-            <span>{post.readTime}</span>
-          </div>
-          <div className="space-y-3">
-            <h1 className="text-4xl font-semibold tracking-tight lg:text-5xl">{post.title}</h1>
-            <p className="max-w-2xl text-base text-muted-foreground lg:text-lg">
-              {post.description}
-            </p>
-          </div>
-        </header>
+            <header className="space-y-6 border-b border-border/70 pb-10">
+              <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                  <Badge variant="outline" className="rounded-full px-3 py-1">
+                    {post.category}
+                  </Badge>
+                  <span>{formatPublishedDate(post.publishedAt)}</span>
+                  <span>·</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Clock3 className="h-3.5 w-3.5" />
+                    {post.readTime}
+                  </span>
+              </div>
+              <div className="space-y-5">
+                  <h1 className="text-balance text-4xl font-semibold tracking-[-0.035em] lg:text-6xl">
+                    {post.title}
+                  </h1>
+                  <p className="max-w-2xl text-xl leading-9 text-muted-foreground">
+                    {post.description}
+                  </p>
+                </div>
+                <div className="overflow-hidden rounded-[1.75rem] border border-border/70 bg-muted/20">
+                  <Image
+                    src={post.image}
+                    alt={post.title}
+                    width={1200}
+                    height={630}
+                    className="h-auto w-full"
+                    priority
+                  />
+                </div>
+                <div className="grid gap-4 text-sm sm:grid-cols-3">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                      Published
+                    </div>
+                    <div className="mt-2 font-medium text-foreground">
+                      {formatPublishedDate(post.publishedAt)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                      Reading time
+                    </div>
+                    <div className="mt-2 font-medium text-foreground">{post.readTime}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+                      Focus
+                    </div>
+                    <div className="mt-2 font-medium text-foreground">
+                      Root cause analysis for agent systems
+                    </div>
+                  </div>
+                </div>
+            </header>
 
-        <div className={prose}>{content}</div>
+            <div className="px-0">
+              <div className={prose}>{content}</div>
+            </div>
+
+            <section className="space-y-4 border-t border-border/70 pt-8">
+              <div className="flex items-center gap-2 text-sm uppercase tracking-[0.16em] text-muted-foreground">
+                <BookOpen className="h-4 w-4" />
+                Keep reading
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                {relatedPosts.map((relatedPost) => (
+                  <Card key={relatedPost.slug} className="rounded-[1.5rem] border-border/70 bg-muted/25 shadow-none">
+                    <CardContent className="space-y-4 p-5">
+                      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                        <Badge variant="outline">{relatedPost.category}</Badge>
+                        <span>{formatPublishedDate(relatedPost.publishedAt)}</span>
+                      </div>
+                      <div className="space-y-2">
+                        <h2 className="text-xl font-semibold tracking-tight">
+                          <Link href={`/blog/${relatedPost.slug}`} className="hover:underline">
+                            {relatedPost.title}
+                          </Link>
+                        </h2>
+                        <p className="text-sm leading-7 text-muted-foreground">
+                          {relatedPost.description}
+                        </p>
+                      </div>
+                      <Link
+                        href={`/blog/${relatedPost.slug}`}
+                        className="inline-flex items-center gap-2 text-sm font-medium text-foreground hover:underline"
+                      >
+                        Read article
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </section>
         </article>
       </div>
     </div>

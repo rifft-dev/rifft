@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Badge } from "@/components/ui/badge";
+import { RifftLogo } from "@/components/rifft-logo";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -12,40 +12,41 @@ const navItems = [
 ];
 
 export function PublicNav({
-  badge,
   className,
+  items = navItems,
 }: {
   badge?: string;
   className?: string;
+  items?: Array<{ href: string; label: string }>;
 }) {
   const pathname = usePathname();
+  const isHomePage = pathname === "/";
 
   return (
-    <div
-      className={cn(
-        "mx-auto flex w-full max-w-7xl items-center justify-between gap-4 rounded-2xl border border-border/70 bg-background/95 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/85",
-        className,
-      )}
-    >
-      <div className="flex items-center gap-3">
-        {badge ? <Badge variant="outline">{badge}</Badge> : null}
-        <Link href="/" className="text-sm font-semibold tracking-tight text-foreground">
-          Rifft
-        </Link>
-      </div>
+    <div className={cn("flex w-full items-center justify-between gap-6", className)}>
+      <Link href="/" className="text-foreground">
+        <RifftLogo className="h-7 w-auto" />
+      </Link>
 
-      <nav className="flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 p-1">
-        {navItems.map((item) => {
+      <nav className="flex flex-wrap items-center justify-end gap-4 text-sm sm:gap-6 md:gap-8">
+        {items.map((item) => {
           const isActive =
             item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`);
+          const opensInNewTab = item.href === "/docs";
 
           return (
             <Link
               key={item.href}
               href={item.href}
+              target={opensInNewTab ? "_blank" : undefined}
+              rel={opensInNewTab ? "noreferrer" : undefined}
               className={cn(
-                "rounded-full px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-background hover:text-foreground",
-                isActive && "bg-background text-foreground shadow-sm",
+                "transition-colors hover:text-foreground",
+                isActive
+                  ? isHomePage
+                    ? "text-white hover:text-white/90"
+                    : "text-foreground"
+                  : "text-muted-foreground",
               )}
             >
               {item.label}

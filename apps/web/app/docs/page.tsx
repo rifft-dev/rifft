@@ -95,7 +95,7 @@ export default function DocsPage() {
   return (
     <div className="min-h-screen bg-background">
       <div className="border-b border-border/80 bg-background/95 px-6 py-4 backdrop-blur lg:px-8">
-        <PublicNav badge="Docs" />
+        <PublicNav items={[{ href: "/", label: "Home" }]} />
       </div>
 
       <div className="mx-auto grid max-w-7xl gap-0 lg:grid-cols-[240px_minmax(0,1fr)]">

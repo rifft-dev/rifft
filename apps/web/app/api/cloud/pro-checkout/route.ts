@@ -2,100 +2,98 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { getAccessTokenFromCookies, resolveActiveProjectId } from "@/lib/cloud-context";
 import { getRequestOrigin } from "@/lib/request-origin";
+import { handleProCheckout } from "./core";
 
 const apiBaseUrl =
   process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-type ProjectResponse = {
-  id: string;
-  account_id: string | null;
-  permissions?: { can_manage_billing?: boolean };
-};
-
-type MeResponse = {
-  user: { email: string | null; name: string | null };
-};
-
-const PRICE_IDS: Record<string, string | undefined> = {
-  pro: process.env.STRIPE_PRO_PRICE_ID,
-  scale: process.env.STRIPE_SCALE_PRICE_ID,
-};
-
 export async function POST(request: Request) {
-  const [projectId, accessToken] = await Promise.all([
-    resolveActiveProjectId(),
-    getAccessTokenFromCookies(),
-  ]);
+  const result = await handleProCheckout(request, {
+    resolveActiveProjectId,
+    getAccessTokenFromCookies,
+    getStripeSecretKey: () => process.env.STRIPE_SECRET_KEY,
+    getPriceId: (planKey) =>
+      planKey === "scale" ? process.env.STRIPE_SCALE_PRICE_ID : process.env.STRIPE_PRO_PRICE_ID,
+    getRequestOrigin,
+    fetchProject: async (projectId, accessToken) => {
+      const response = await fetch(`${apiBaseUrl}/projects/${projectId}`, {
+        cache: "no-store",
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
 
-  if (!projectId || !accessToken) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+      const data = (await response.json().catch(() => undefined)) as Record<string, unknown> | undefined;
 
-  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-  if (!stripeSecretKey) {
-    return NextResponse.json({ error: "stripe_not_configured" }, { status: 500 });
-  }
+      if (!response.ok) {
+        return {
+          ok: false as const,
+          status: response.status,
+          error: typeof data?.error === "string" ? data.error : undefined,
+        };
+      }
 
-  const body = (await request.json().catch(() => ({}))) as { planKey?: string };
-  const planKey = body.planKey === "scale" ? "scale" : "pro";
-  const priceId = PRICE_IDS[planKey];
-  if (!priceId) {
-    return NextResponse.json({ error: "price_not_configured" }, { status: 500 });
-  }
-
-  const [projectResponse, meResponse] = await Promise.all([
-    fetch(`${apiBaseUrl}/projects/${projectId}`, {
-      cache: "no-store",
-      headers: { authorization: `Bearer ${accessToken}` },
-    }),
-    fetch(`${apiBaseUrl}/cloud/me`, {
-      cache: "no-store",
-      headers: { authorization: `Bearer ${accessToken}` },
-    }),
-  ]);
-
-  if (!projectResponse.ok || !meResponse.ok) {
-    return NextResponse.json({ error: "cloud_context_unavailable" }, { status: 500 });
-  }
-
-  const project = (await projectResponse.json()) as ProjectResponse;
-  const me = (await meResponse.json()) as MeResponse;
-
-  if (!project.account_id) {
-    return NextResponse.json({ error: "missing_account_id" }, { status: 400 });
-  }
-  if (!project.permissions?.can_manage_billing) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
-
-  const stripe = new Stripe(stripeSecretKey);
-  const requestOrigin = getRequestOrigin(request);
-  const successUrl = new URL("/settings?checkout=success", requestOrigin).toString();
-  const cancelUrl = new URL("/settings", requestOrigin).toString();
-
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    line_items: [{ price: priceId, quantity: 1 }],
-    customer_email: me.user.email ?? undefined,
-    success_url: successUrl,
-    cancel_url: cancelUrl,
-    metadata: {
-      account_id: project.account_id,
-      project_id: project.id,
-      plan_key: planKey,
+      return {
+        ok: true as const,
+        data: data as {
+          id: string;
+          account_id: string | null;
+          permissions?: { can_manage_billing?: boolean };
+        },
+      };
     },
-    subscription_data: {
-      metadata: {
-        account_id: project.account_id,
-        project_id: project.id,
-        plan_key: planKey,
-      },
+    fetchMe: async (accessToken) => {
+      const response = await fetch(`${apiBaseUrl}/cloud/me`, {
+        cache: "no-store",
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+
+      const data = (await response.json().catch(() => undefined)) as Record<string, unknown> | undefined;
+
+      if (!response.ok) {
+        return {
+          ok: false as const,
+          status: response.status,
+          error: typeof data?.error === "string" ? data.error : undefined,
+        };
+      }
+
+      return {
+        ok: true as const,
+        data: data as {
+          user: { email: string | null; name: string | null };
+        },
+      };
+    },
+    createCheckoutSession: async ({
+      priceId,
+      customerEmail,
+      successUrl,
+      cancelUrl,
+      accountId,
+      projectId,
+      planKey,
+    }) => {
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "");
+      return stripe.checkout.sessions.create({
+        mode: "subscription",
+        line_items: [{ price: priceId, quantity: 1 }],
+        customer_email: customerEmail,
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        metadata: {
+          account_id: accountId,
+          project_id: projectId,
+          plan_key: planKey,
+        },
+        subscription_data: {
+          metadata: {
+            account_id: accountId,
+            project_id: projectId,
+            plan_key: planKey,
+          },
+        },
+      });
     },
   });
 
-  if (!session.url) {
-    return NextResponse.json({ error: "missing_checkout_url" }, { status: 500 });
-  }
-
-  return NextResponse.json({ url: session.url });
+  return NextResponse.json(result.body, { status: result.status });
 }

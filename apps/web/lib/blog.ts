@@ -4,6 +4,8 @@ export type BlogPostMeta = {
   description: string;
   publishedAt: string;
   readTime: string;
+  category: string;
+  image: string;
   keywords: string[];
 };
 
@@ -15,6 +17,8 @@ export const blogPosts: BlogPostMeta[] = [
       "A practical guide to debugging a CrewAI agent pipeline failure, including how to isolate the bad handoff, inspect the trace, and confirm the fix.",
     publishedAt: "2026-04-18",
     readTime: "8 min read",
+    category: "Guide",
+    image: "/blog-crewai-debug.svg",
     keywords: [
       "how to debug a crewai agent pipeline failure",
       "crewai debugging",
@@ -29,6 +33,8 @@ export const blogPosts: BlogPostMeta[] = [
       "A practical comparison of CrewAI and AutoGen debugging, including the failure patterns each framework tends to produce and how to investigate them.",
     publishedAt: "2026-04-18",
     readTime: "7 min read",
+    category: "Comparison",
+    image: "/blog-crewai-vs-autogen.svg",
     keywords: [
       "crewai vs autogen debugging",
       "crewai autogen comparison",
@@ -43,6 +49,8 @@ export const blogPosts: BlogPostMeta[] = [
       "A guide to agent handoff failures in multi-agent systems, including dropped handoffs, malformed payloads, context loss, and how to classify them systematically.",
     publishedAt: "2026-04-18",
     readTime: "9 min read",
+    category: "Systems",
+    image: "/blog-handoff-failures.svg",
     keywords: [
       "understanding agent handoff failures in multi-agent systems",
       "agent handoff failures",

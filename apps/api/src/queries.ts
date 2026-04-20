@@ -1,6 +1,11 @@
 import { randomBytes } from "node:crypto";
 import type { QueryResultRow } from "pg";
 import { queryClickHouse, pgPool } from "./db.js";
+import {
+  getPermissionsForRoles,
+  type MembershipRole,
+  type ProjectPermissions,
+} from "./membership.js";
 
 type TraceListFilters = {
   projectId: string;
@@ -86,14 +91,6 @@ type AuthenticatedUser = {
   id: string;
   email: string | null;
   name: string | null;
-};
-
-type MembershipRole = "owner" | "member";
-
-type ProjectPermissions = {
-  can_manage_billing: boolean;
-  can_rotate_api_keys: boolean;
-  can_update_settings: boolean;
 };
 
 type ProjectAccessContext = {
@@ -265,19 +262,6 @@ const normalizeMembershipRole = (value: unknown): MembershipRole | null => {
   }
 
   return null;
-};
-
-const getPermissionsForRoles = (
-  projectRole: MembershipRole | null,
-  accountRole: MembershipRole | null,
-): ProjectPermissions => {
-  const isOwner = projectRole === "owner" || accountRole === "owner";
-
-  return {
-    can_manage_billing: accountRole === "owner",
-    can_rotate_api_keys: isOwner,
-    can_update_settings: isOwner,
-  };
 };
 
 let forkDraftsTableEnsured = false;
@@ -2637,13 +2621,18 @@ export const removeProjectMember = async (
     return { ok: false, reason: "cannot_remove_owner" as const };
   }
 
-  await pgPool.query(
+  const removalResult = await pgPool.query(
     `
       DELETE FROM project_memberships
       WHERE project_id = $1 AND user_id = $2
+      RETURNING user_id
     `,
     [projectId, targetUserId],
   );
+
+  if (removalResult.rowCount === 0) {
+    return { ok: false, reason: "member_not_found" as const };
+  }
 
   return { ok: true, reason: null };
 };

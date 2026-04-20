@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { PublicNav } from "@/components/public-nav";
 import { RifftLogo } from "@/components/rifft-logo";
 import { siteDescription, siteName, siteUrl } from "@/lib/seo";
 import { AuthForm } from "./auth-form";
@@ -136,25 +137,7 @@ export default async function HomePage({
       />
       <div className="px-6 py-8 lg:px-8 lg:py-10">
         <div className="mx-auto max-w-[1200px]">
-          <nav className="flex items-center justify-between gap-6">
-            <Link href="/" className="text-foreground">
-              <RifftLogo className="h-7 w-auto" />
-            </Link>
-            <div className="hidden items-center gap-8 text-sm text-muted-foreground md:flex">
-              <a href="#product" className="transition-colors hover:text-foreground">
-                Product
-              </a>
-              <a href="#pricing" className="transition-colors hover:text-foreground">
-                Pricing
-              </a>
-              <Link href="/docs" className="transition-colors hover:text-foreground">
-                Docs
-              </Link>
-              <a href="#footer" className="transition-colors hover:text-foreground">
-                Changelog
-              </a>
-            </div>
-          </nav>
+          <PublicNav />
 
           <section className="grid gap-12 py-12 lg:grid-cols-[1.15fr_1fr] lg:gap-[72px] lg:py-20">
             <div className="space-y-8">

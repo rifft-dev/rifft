@@ -82,7 +82,7 @@ export function InviteMemberCard({
               : data.error === "cannot_invite_self"
                 ? "You can't invite yourself — you're already the owner."
                 : data.error === "member_limit_reached"
-                  ? "Free accounts include 1 additional member. Upgrade to Pro for unlimited members."
+                  ? "Free accounts include 1 additional member, and pending invites count toward that limit. Upgrade to Pro for unlimited members."
                   : "Could not send the invitation.",
         );
       }
@@ -117,7 +117,14 @@ export function InviteMemberCard({
           body: JSON.stringify({ pending_email: member.user_email }),
         });
         if (!response.ok) {
-          throw new Error("Could not cancel this invitation.");
+          const data = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(
+            data.error === "pending_invite_not_found"
+              ? "That invitation was already removed."
+              : data.error === "forbidden"
+                ? "Only workspace owners can cancel invitations."
+                : "Could not cancel this invitation.",
+          );
         }
         toast.success(`Invitation to ${identifier} cancelled.`);
       } else {
@@ -133,6 +140,8 @@ export function InviteMemberCard({
               ? "Only workspace owners can remove members."
               : data.error === "cannot_remove_owner"
                 ? "The workspace owner cannot be removed."
+                : data.error === "member_not_found"
+                  ? "That member was already removed."
                 : "Could not remove this member.",
           );
         }
@@ -161,7 +170,7 @@ export function InviteMemberCard({
         <div className="space-y-3">
           {isFreePlan ? (
             <p className="text-xs text-muted-foreground">
-              Free accounts include 1 additional member.{" "}
+              Free accounts include 1 additional member, and pending invites count toward that limit.{" "}
               <a href="/settings" className="underline underline-offset-2">
                 Upgrade to Pro
               </a>{" "}

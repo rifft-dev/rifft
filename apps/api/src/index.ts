@@ -1,8 +1,10 @@
 import Fastify from "fastify";
 import Stripe from "stripe";
 import type { FastifyRequest } from "fastify";
+import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { closePools, pgPool } from "./db.js";
+import { buildRemoveMemberInput } from "./membership.js";
 import { getBearerToken, getSupabaseAdminClient, isSupabaseConfigured } from "./supabase.js";
 import {
   bootstrapCloudProject,
@@ -41,18 +43,6 @@ const port = Number(process.env.PORT ?? 4000);
 const databaseUrl = process.env.DATABASE_URL ?? "";
 const clickhouseUrl = process.env.CLICKHOUSE_URL ?? "";
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
-
-const app = Fastify({ logger: true });
-
-app.addContentTypeParser("application/json", { parseAs: "string" }, (request, body, done) => {
-  try {
-    const rawBody = typeof body === "string" ? body : body.toString("utf8");
-    (request as FastifyRequest & { rawBody?: string }).rawBody = rawBody;
-    done(null, JSON.parse(rawBody));
-  } catch (error) {
-    done(error as Error, undefined);
-  }
-});
 
 type AuthenticatedUser = {
   id: string;
@@ -105,17 +95,99 @@ const canAccessTrace = async (user: AuthenticatedUser | null, traceId: string) =
   return Boolean(accessibleProject);
 };
 
-app.get("/health", async () => ({
-  status: "ok",
-  service: "api",
-  dependencies: {
-    postgresConfigured: databaseUrl.length > 0,
-    clickhouseConfigured: clickhouseUrl.length > 0,
-    supabaseConfigured: supabaseUrl.length > 0,
-  },
-}));
+const getStripeCustomerIdForAccount = async (accountId: string): Promise<string | null> => {
+  const sub = await pgPool.query<{ provider_customer_id: string }>(
+    `SELECT provider_customer_id FROM subscriptions
+     WHERE account_id = $1 AND provider = 'stripe'
+     AND status IN ('active', 'trialing', 'past_due')
+     ORDER BY updated_at DESC LIMIT 1`,
+    [accountId],
+  );
 
-app.post("/webhooks/stripe", async (request, reply) => {
+  return sub.rows[0]?.provider_customer_id ?? null;
+};
+
+const createStripeBillingPortalSession = async ({
+  customerId,
+  returnUrl,
+}: {
+  customerId: string;
+  returnUrl: string;
+}) => {
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    throw new Error("stripe_not_configured");
+  }
+
+  const stripe = new Stripe(stripeSecretKey);
+  const session = await stripe.billingPortal.sessions.create({
+    customer: customerId,
+    return_url: returnUrl,
+  });
+
+  return session.url;
+};
+
+type AppDeps = {
+  getAuthenticatedUser: typeof getAuthenticatedUser;
+  getAccessibleProject: typeof getAccessibleProject;
+  getProject: typeof getProject;
+  bootstrapCloudProject: typeof bootstrapCloudProject;
+  consumePendingInvites: typeof consumePendingInvites;
+  createCloudWorkspaceForUser: typeof createCloudWorkspaceForUser;
+  deleteProject: typeof deleteProject;
+  isPrimaryWorkspace: typeof isPrimaryWorkspace;
+  getStripeCustomerIdForAccount: typeof getStripeCustomerIdForAccount;
+  createStripeBillingPortalSession: typeof createStripeBillingPortalSession;
+  listProjectMembers: typeof listProjectMembers;
+  addProjectMember: typeof addProjectMember;
+  removeProjectMember: typeof removeProjectMember;
+  pgQuery: (query: string, params?: unknown[]) => Promise<unknown>;
+};
+
+export const createApp = (
+  deps: Partial<AppDeps> = {},
+) => {
+  const app = Fastify({ logger: false });
+  const resolvedDeps: AppDeps = {
+    getAuthenticatedUser,
+    getAccessibleProject,
+    getProject,
+    bootstrapCloudProject,
+    consumePendingInvites,
+    createCloudWorkspaceForUser,
+    deleteProject,
+    isPrimaryWorkspace,
+    getStripeCustomerIdForAccount,
+    createStripeBillingPortalSession,
+    listProjectMembers,
+    addProjectMember,
+    removeProjectMember,
+    pgQuery: pgPool.query.bind(pgPool),
+    ...deps,
+  };
+
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (request, body, done) => {
+    try {
+      const rawBody = typeof body === "string" ? body : body.toString("utf8");
+      (request as FastifyRequest & { rawBody?: string }).rawBody = rawBody;
+      done(null, JSON.parse(rawBody));
+    } catch (error) {
+      done(error as Error, undefined);
+    }
+  });
+
+  app.get("/health", async () => ({
+    status: "ok",
+    service: "api",
+    dependencies: {
+      postgresConfigured: databaseUrl.length > 0,
+      clickhouseConfigured: clickhouseUrl.length > 0,
+      supabaseConfigured: supabaseUrl.length > 0,
+    },
+  }));
+
+  app.post("/webhooks/stripe", async (request, reply) => {
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
@@ -160,10 +232,10 @@ app.post("/webhooks/stripe", async (request, reply) => {
   };
   const result = await syncStripeSubscription(event.type, subscription);
   return { received: true, ...result };
-});
+  });
 
-app.get("/projects", async (request, reply) => {
-  const user = await getAuthenticatedUser(request.headers.authorization);
+  app.get("/projects", async (request, reply) => {
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
   if (!user) {
     reply.code(401);
     return { error: "unauthorized" };
@@ -172,10 +244,10 @@ app.get("/projects", async (request, reply) => {
   return {
     projects: await listProjectsForUser(user.id),
   };
-});
+  });
 
-app.get("/cloud/me", async (request, reply) => {
-  const user = await getAuthenticatedUser(request.headers.authorization);
+  app.get("/cloud/me", async (request, reply) => {
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
   if (!user) {
     reply.code(401);
     return { error: "unauthorized" };
@@ -186,10 +258,10 @@ app.get("/cloud/me", async (request, reply) => {
     user,
     active_project: activeProject,
   };
-});
+  });
 
-app.get("/cloud/projects", async (request, reply) => {
-  const user = await getAuthenticatedUser(request.headers.authorization);
+  app.get("/cloud/projects", async (request, reply) => {
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
   if (!user) {
     reply.code(401);
     return { error: "unauthorized" };
@@ -198,10 +270,10 @@ app.get("/cloud/projects", async (request, reply) => {
   return {
     projects: await listProjectsForUser(user.id),
   };
-});
+  });
 
-app.post("/cloud/projects", async (request, reply) => {
-  const user = await getAuthenticatedUser(request.headers.authorization);
+  app.post("/cloud/projects", async (request, reply) => {
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
   if (!user) {
     reply.code(401);
     return { error: "unauthorized" };
@@ -221,7 +293,7 @@ app.post("/cloud/projects", async (request, reply) => {
   }
 
   try {
-    const project = await createCloudWorkspaceForUser({
+    const project = await resolvedDeps.createCloudWorkspaceForUser({
       userId: user.id,
       email: user.email,
       name: parsed.data.name,
@@ -244,10 +316,10 @@ app.post("/cloud/projects", async (request, reply) => {
     }
     throw error;
   }
-});
+  });
 
-app.post("/stripe/customer-portal", async (request, reply) => {
-  const user = await getAuthenticatedUser(request.headers.authorization);
+  app.post("/stripe/customer-portal", async (request, reply) => {
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
   if (!user) {
     reply.code(401);
     return { error: "unauthorized" };
@@ -265,35 +337,26 @@ app.post("/stripe/customer-portal", async (request, reply) => {
     return { error: "stripe_not_configured" };
   }
 
-  const sub = await pgPool.query<{ provider_customer_id: string }>(
-    `SELECT provider_customer_id FROM subscriptions
-     WHERE account_id = $1 AND provider = 'stripe'
-     AND status IN ('active', 'trialing', 'past_due')
-     ORDER BY updated_at DESC LIMIT 1`,
-    [body.account_id],
-  );
-
-  const customerId = sub.rows[0]?.provider_customer_id;
+  const customerId = await resolvedDeps.getStripeCustomerIdForAccount(body.account_id);
   if (!customerId) {
     reply.code(404);
     return { error: "no_stripe_customer" };
   }
 
-  const stripe = new Stripe(stripeSecretKey);
-  const session = await stripe.billingPortal.sessions.create({
-    customer: customerId,
-    return_url: body.return_url ?? `${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.rifft.dev"}/settings`,
+  const url = await resolvedDeps.createStripeBillingPortalSession({
+    customerId,
+    returnUrl: body.return_url ?? `${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.rifft.dev"}/settings`,
   });
 
-  return { url: session.url };
-});
+  return { url };
+  });
 
-app.get("/projects/:id", async (request, reply) => {
+  app.get("/projects/:id", async (request, reply) => {
   const projectId = (request.params as { id: string }).id;
-  const user = await getAuthenticatedUser(request.headers.authorization);
+  const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
   const project = user
-    ? await getAccessibleProject(user.id, projectId)
-    : await getProject(projectId);
+    ? await resolvedDeps.getAccessibleProject(user.id, projectId)
+    : await resolvedDeps.getProject(projectId);
   if (!user && project?.account_id) {
     reply.code(404);
     return { error: "not_found" };
@@ -307,7 +370,7 @@ app.get("/projects/:id", async (request, reply) => {
     ...project,
     is_primary_workspace: await isPrimaryWorkspace(projectId),
   };
-});
+  });
 
 app.post("/projects", async (request, reply) => {
   const bodySchema = z.object({
@@ -328,14 +391,14 @@ app.post("/projects", async (request, reply) => {
   return project;
 });
 
-app.post("/cloud/bootstrap", async (request, reply) => {
-  const user = await getAuthenticatedUser(request.headers.authorization);
+  app.post("/cloud/bootstrap", async (request, reply) => {
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
   if (!user) {
     reply.code(401);
     return { error: "unauthorized" };
   }
 
-  const project = await bootstrapCloudProject({
+  const project = await resolvedDeps.bootstrapCloudProject({
     userId: user.id,
     email: user.email,
     name: user.name,
@@ -343,11 +406,11 @@ app.post("/cloud/bootstrap", async (request, reply) => {
 
   let activeProjectId = project.id;
   if (user.email) {
-    activeProjectId = (await consumePendingInvites(user.id, user.email)) ?? project.id;
+    activeProjectId = (await resolvedDeps.consumePendingInvites(user.id, user.email)) ?? project.id;
   }
 
   return { project, active_project_id: activeProjectId };
-});
+  });
 
 app.patch("/projects/:id", async (request, reply) => {
   const projectId = (request.params as { id: string }).id;
@@ -396,10 +459,10 @@ app.patch("/projects/:id", async (request, reply) => {
 
 app.delete("/projects/:id", async (request, reply) => {
   const projectId = (request.params as { id: string }).id;
-  const user = await getAuthenticatedUser(request.headers.authorization);
+  const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
 
   if (user) {
-    const accessibleProject = await getAccessibleProject(user.id, projectId);
+    const accessibleProject = await resolvedDeps.getAccessibleProject(user.id, projectId);
     if (!accessibleProject) {
       reply.code(404);
       return { error: "not_found" };
@@ -409,7 +472,7 @@ app.delete("/projects/:id", async (request, reply) => {
       return { error: "forbidden" };
     }
   } else {
-    const project = await getProject(projectId);
+    const project = await resolvedDeps.getProject(projectId);
     if (project?.account_id) {
       reply.code(404);
       return { error: "not_found" };
@@ -420,12 +483,12 @@ app.delete("/projects/:id", async (request, reply) => {
     }
   }
 
-  if (await isPrimaryWorkspace(projectId)) {
+  if (await resolvedDeps.isPrimaryWorkspace(projectId)) {
     reply.code(409);
     return { error: "primary_workspace_protected" };
   }
 
-  await deleteProject(projectId);
+  await resolvedDeps.deleteProject(projectId);
   return { ok: true };
 });
 
@@ -796,223 +859,250 @@ app.get("/traces/:traceId/agents/:agentId", async (request, reply) => {
   return detail;
 });
 
-const dispatchFatalFailureAlert = async (traceId: string) => {
-  const alertWebhookUrl = process.env.ALERT_WEBHOOK_URL;
-  const candidates = await getAlertCandidatesForTrace(traceId);
-  if (!candidates) {
-    return;
-  }
+  const dispatchFatalFailureAlert = async (traceId: string) => {
+    const alertWebhookUrl = process.env.ALERT_WEBHOOK_URL;
+    const candidates = await getAlertCandidatesForTrace(traceId);
+    if (!candidates) {
+      return;
+    }
 
-  const payload = {
-    event: "trace.fatal_failure",
-    trace_id: candidates.trace_id,
-    project_id: candidates.project_id,
-    project_name: candidates.project_name,
-    started_at: candidates.started_at,
-    total_cost_usd: candidates.total_cost_usd,
-    fatal_failures: candidates.fatal_failures.map((f: { mode: string; agent_id: string | null; explanation: string }) => ({
-      mode: f.mode,
-      agent_id: f.agent_id,
-      explanation: f.explanation,
-    })),
-    trace_url: `${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.rifft.dev"}/traces/${traceId}`,
+    const payload = {
+      event: "trace.fatal_failure",
+      trace_id: candidates.trace_id,
+      project_id: candidates.project_id,
+      project_name: candidates.project_name,
+      started_at: candidates.started_at,
+      total_cost_usd: candidates.total_cost_usd,
+      fatal_failures: candidates.fatal_failures.map(
+        (f: { mode: string; agent_id: string | null; explanation: string }) => ({
+          mode: f.mode,
+          agent_id: f.agent_id,
+          explanation: f.explanation,
+        }),
+      ),
+      trace_url: `${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.rifft.dev"}/traces/${traceId}`,
+    };
+
+    if (alertWebhookUrl) {
+      await fetch(alertWebhookUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      }).catch((error) => {
+        app.log.warn({ error, traceId }, "Alert webhook dispatch failed");
+      });
+    }
   };
 
-  if (alertWebhookUrl) {
+  const dispatchThresholdAlert = async (traceId: string) => {
+    const alertWebhookUrl = process.env.ALERT_WEBHOOK_URL;
+    if (!alertWebhookUrl) {
+      return;
+    }
+
+    const trace = await getTrace(traceId);
+    if (!trace) {
+      return;
+    }
+
+    const project = await getProject(trace.project_id);
+    if (!project) {
+      return;
+    }
+
+    const violations: Array<{ type: string; value: number; threshold: number }> = [];
+
+    if (project.cost_threshold_usd > 0 && trace.total_cost_usd > project.cost_threshold_usd) {
+      violations.push({
+        type: "cost_exceeded",
+        value: trace.total_cost_usd,
+        threshold: project.cost_threshold_usd,
+      });
+    }
+
+    if (project.timeout_threshold_ms > 0 && trace.duration_ms > project.timeout_threshold_ms) {
+      violations.push({
+        type: "timeout_exceeded",
+        value: trace.duration_ms,
+        threshold: project.timeout_threshold_ms,
+      });
+    }
+
+    if (violations.length === 0) {
+      return;
+    }
+
+    const payload = {
+      event: "trace.threshold_exceeded",
+      trace_id: traceId,
+      project_id: trace.project_id,
+      project_name: project.name,
+      started_at: trace.started_at,
+      total_cost_usd: trace.total_cost_usd,
+      duration_ms: trace.duration_ms,
+      violations,
+      trace_url: `${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.rifft.dev"}/traces/${traceId}`,
+    };
+
     await fetch(alertWebhookUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
     }).catch((error) => {
-      app.log.warn({ error, traceId }, "Alert webhook dispatch failed");
+      app.log.warn({ error, traceId }, "Threshold alert webhook dispatch failed");
     });
-  }
-};
-
-// Fires when a completed trace exceeds the project's cost or timeout thresholds.
-const dispatchThresholdAlert = async (traceId: string) => {
-  const alertWebhookUrl = process.env.ALERT_WEBHOOK_URL;
-  if (!alertWebhookUrl) {
-    return;
-  }
-
-  const trace = await getTrace(traceId);
-  if (!trace) {
-    return;
-  }
-
-  const project = await getProject(trace.project_id);
-  if (!project) {
-    return;
-  }
-
-  const violations: Array<{ type: string; value: number; threshold: number }> = [];
-
-  if (project.cost_threshold_usd > 0 && trace.total_cost_usd > project.cost_threshold_usd) {
-    violations.push({
-      type: "cost_exceeded",
-      value: trace.total_cost_usd,
-      threshold: project.cost_threshold_usd,
-    });
-  }
-
-  if (project.timeout_threshold_ms > 0 && trace.duration_ms > project.timeout_threshold_ms) {
-    violations.push({
-      type: "timeout_exceeded",
-      value: trace.duration_ms,
-      threshold: project.timeout_threshold_ms,
-    });
-  }
-
-  if (violations.length === 0) {
-    return;
-  }
-
-  const payload = {
-    event: "trace.threshold_exceeded",
-    trace_id: traceId,
-    project_id: trace.project_id,
-    project_name: project.name,
-    started_at: trace.started_at,
-    total_cost_usd: trace.total_cost_usd,
-    duration_ms: trace.duration_ms,
-    violations,
-    trace_url: `${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.rifft.dev"}/traces/${traceId}`,
   };
 
-  await fetch(alertWebhookUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  }).catch((error) => {
-    app.log.warn({ error, traceId }, "Threshold alert webhook dispatch failed");
-  });
-};
+  app.post("/internal/traces/:traceId/alert", async (request, reply) => {
+    const internalSecret = process.env.INTERNAL_API_SECRET;
+    if (internalSecret) {
+      const provided = request.headers["x-internal-secret"];
+      if (provided !== internalSecret) {
+        reply.code(401);
+        return { error: "unauthorized" };
+      }
+    }
 
-app.post("/internal/traces/:traceId/alert", async (request, reply) => {
-  const internalSecret = process.env.INTERNAL_API_SECRET;
-  if (internalSecret) {
-    const provided = request.headers["x-internal-secret"];
-    if (provided !== internalSecret) {
+    const traceId = (request.params as { traceId: string }).traceId;
+    await Promise.all([dispatchFatalFailureAlert(traceId), dispatchThresholdAlert(traceId)]);
+    return { ok: true };
+  });
+
+  app.get("/projects/:id/members", async (request, reply) => {
+    const projectId = (request.params as { id: string }).id;
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
+    if (!user) {
       reply.code(401);
       return { error: "unauthorized" };
     }
-  }
 
-  const traceId = (request.params as { traceId: string }).traceId;
-  await Promise.all([
-    dispatchFatalFailureAlert(traceId),
-    dispatchThresholdAlert(traceId),
-  ]);
-  return { ok: true };
-});
+    const accessibleProject = await resolvedDeps.getAccessibleProject(user.id, projectId);
+    if (!accessibleProject) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
 
-app.get("/projects/:id/members", async (request, reply) => {
-  const projectId = (request.params as { id: string }).id;
-  const user = await getAuthenticatedUser(request.headers.authorization);
-  if (!user) {
-    reply.code(401);
-    return { error: "unauthorized" };
-  }
-
-  const accessibleProject = await getAccessibleProject(user.id, projectId);
-  if (!accessibleProject) {
-    reply.code(404);
-    return { error: "not_found" };
-  }
-
-  return { members: await listProjectMembers(projectId) };
-});
-
-app.post("/projects/:id/members", async (request, reply) => {
-  const projectId = (request.params as { id: string }).id;
-  const bodySchema = z.object({
-    email: z.string().email(),
-    role: z.literal("member").default("member"),
+    return { members: await resolvedDeps.listProjectMembers(projectId) };
   });
-  const parsed = bodySchema.safeParse(request.body);
 
-  if (!parsed.success) {
-    reply.code(400);
-    return { error: "invalid_request", message: parsed.error.message };
-  }
+  app.post("/projects/:id/members", async (request, reply) => {
+    const projectId = (request.params as { id: string }).id;
+    const bodySchema = z.object({
+      email: z.string().email(),
+      role: z.literal("member").default("member"),
+    });
+    const parsed = bodySchema.safeParse(request.body);
 
-  const user = await getAuthenticatedUser(request.headers.authorization);
-  if (!user) {
-    reply.code(401);
-    return { error: "unauthorized" };
-  }
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: "invalid_request", message: parsed.error.message };
+    }
 
-  const result = await addProjectMember(projectId, user.id, parsed.data.email);
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
+    if (!user) {
+      reply.code(401);
+      return { error: "unauthorized" };
+    }
 
-  if (!result.ok) {
-    const status = result.reason === "forbidden" ? 403
-      : result.reason === "already_member" ? 409
-      : result.reason === "cannot_invite_self" ? 422
-      : result.reason === "member_limit_reached" ? 403
-      : 400;
-    reply.code(status);
-    return { error: result.reason };
-  }
+    const result = await resolvedDeps.addProjectMember(projectId, user.id, parsed.data.email);
 
-  reply.code(201);
-  return { ok: true, pending: result.reason === "pending" };
-});
+    if (!result.ok) {
+      const status = result.reason === "forbidden"
+        ? 403
+        : result.reason === "already_member"
+          ? 409
+          : result.reason === "cannot_invite_self"
+            ? 422
+            : result.reason === "member_limit_reached"
+              ? 403
+              : 400;
+      reply.code(status);
+      return { error: result.reason };
+    }
 
-app.delete("/projects/:id/members", async (request, reply) => {
-  const projectId = (request.params as { id: string }).id;
-  const bodySchema = z.union([
-    z.object({ user_id: z.string().min(1) }),
-    z.object({ pending_email: z.string().email() }),
-  ]);
-  const parsed = bodySchema.safeParse(request.body);
+    reply.code(201);
+    return { ok: true, pending: result.reason === "pending" };
+  });
 
-  if (!parsed.success) {
-    reply.code(400);
-    return { error: "invalid_request", message: parsed.error.message };
-  }
+  app.delete("/projects/:id/members", async (request, reply) => {
+    const projectId = (request.params as { id: string }).id;
+    const bodySchema = z.union([
+      z.object({ user_id: z.string().min(1) }),
+      z.object({ pending_email: z.string().email() }),
+    ]);
+    const parsed = bodySchema.safeParse(request.body);
 
-  const user = await getAuthenticatedUser(request.headers.authorization);
-  if (!user) {
-    reply.code(401);
-    return { error: "unauthorized" };
-  }
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: "invalid_request", message: parsed.error.message };
+    }
 
-  const accessibleProject = await getAccessibleProject(user.id, projectId);
-  if (!accessibleProject?.permissions.can_update_settings) {
-    reply.code(403);
-    return { error: "forbidden" };
-  }
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
+    if (!user) {
+      reply.code(401);
+      return { error: "unauthorized" };
+    }
 
-  if ("pending_email" in parsed.data) {
-    await pgPool.query(
-      `DELETE FROM pending_project_invites WHERE project_id = $1 AND invitee_email = $2`,
-      [projectId, parsed.data.pending_email],
+    const accessibleProject = await resolvedDeps.getAccessibleProject(user.id, projectId);
+    if (!accessibleProject?.permissions.can_update_settings) {
+      reply.code(403);
+      return { error: "forbidden" };
+    }
+
+    if ("pending_email" in parsed.data) {
+      const result = await resolvedDeps.pgQuery(
+        `DELETE FROM pending_project_invites WHERE project_id = $1 AND invitee_email = $2`,
+        [projectId, parsed.data.pending_email],
+      ) as { rowCount?: number };
+
+      if (!result.rowCount) {
+        reply.code(404);
+        return { error: "pending_invite_not_found" };
+      }
+
+      return { ok: true };
+    }
+
+    const removeInput = buildRemoveMemberInput(projectId, user.id, parsed.data.user_id);
+    const result = await resolvedDeps.removeProjectMember(
+      removeInput.projectId,
+      removeInput.removerUserId,
+      removeInput.targetUserId,
     );
+
+    if (!result.ok) {
+      const status = result.reason === "forbidden"
+        ? 403
+        : result.reason === "cannot_remove_owner"
+          ? 422
+          : result.reason === "member_not_found"
+            ? 404
+            : 400;
+      reply.code(status);
+      return { error: result.reason };
+    }
+
     return { ok: true };
+  });
+
+  return app;
+};
+
+const isMainModule = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+
+if (isMainModule) {
+  process.on("SIGINT", () => void closePools());
+  process.on("SIGTERM", () => void closePools());
+
+  if (process.env.STRIPE_SECRET_KEY && !process.env.STRIPE_WEBHOOK_SECRET) {
+    throw new Error("STRIPE_WEBHOOK_SECRET must be set when Stripe billing is enabled");
   }
 
-  const result = await removeProjectMember(user.id, projectId, parsed.data.user_id);
-
-  if (!result.ok) {
-    const status = result.reason === "forbidden" ? 403
-      : result.reason === "cannot_remove_owner" ? 422
-      : 400;
-    reply.code(status);
-    return { error: result.reason };
-  }
-
-  return { ok: true };
-});
-
-process.on("SIGINT", () => void closePools());
-process.on("SIGTERM", () => void closePools());
-
-if (process.env.STRIPE_SECRET_KEY && !process.env.STRIPE_WEBHOOK_SECRET) {
-  throw new Error("STRIPE_WEBHOOK_SECRET must be set when Stripe billing is enabled");
+  const app = createApp();
+  app.listen({ host: "0.0.0.0", port }).catch((error) => {
+    app.log.error(error);
+    process.exit(1);
+  });
 }
-
-app.listen({ host: "0.0.0.0", port }).catch((error) => {
-  app.log.error(error);
-  process.exit(1);
-});

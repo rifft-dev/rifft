@@ -1,0 +1,80 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="40%" cy="50%" r="80%">
+      <stop offset="0%" stop-color="#0c0c14"/>
+      <stop offset="100%" stop-color="#05050a"/>
+    </radialGradient>
+    <radialGradient id="g1" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#dc2626" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#dc2626" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="g2" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#7c3aed" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="blur" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="60"/>
+    </filter>
+    <filter id="blurSm" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="20"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- Ambient colour pools -->
+  <ellipse cx="480" cy="280" rx="350" ry="280" fill="url(#g1)" filter="url(#blur)"/>
+  <ellipse cx="900" cy="200" rx="280" ry="240" fill="url(#g2)" filter="url(#blur)"/>
+
+  <!-- Abstract: a cascade of thinning horizontal lines, like a signal degrading -->
+  <!-- Full lines left side - healthy signal -->
+  <line x1="80" y1="180" x2="460" y2="180" stroke="#ffffff" stroke-width="1.5" opacity="0.08"/>
+  <line x1="80" y1="200" x2="460" y2="200" stroke="#ffffff" stroke-width="1.5" opacity="0.07"/>
+  <line x1="80" y1="220" x2="460" y2="220" stroke="#ffffff" stroke-width="1.5" opacity="0.06"/>
+  <line x1="80" y1="240" x2="460" y2="240" stroke="#ffffff" stroke-width="1.5" opacity="0.05"/>
+  <line x1="80" y1="260" x2="460" y2="260" stroke="#ffffff" stroke-width="1.5" opacity="0.06"/>
+  <line x1="80" y1="280" x2="460" y2="280" stroke="#ffffff" stroke-width="1.5" opacity="0.07"/>
+  <line x1="80" y1="300" x2="460" y2="300" stroke="#ffffff" stroke-width="1.5" opacity="0.08"/>
+  <line x1="80" y1="320" x2="460" y2="320" stroke="#ffffff" stroke-width="1.5" opacity="0.06"/>
+  <line x1="80" y1="340" x2="460" y2="340" stroke="#ffffff" stroke-width="1.5" opacity="0.05"/>
+  <line x1="80" y1="360" x2="460" y2="360" stroke="#ffffff" stroke-width="1.5" opacity="0.04"/>
+  <line x1="80" y1="380" x2="460" y2="380" stroke="#ffffff" stroke-width="1.5" opacity="0.05"/>
+  <line x1="80" y1="400" x2="460" y2="400" stroke="#ffffff" stroke-width="1.5" opacity="0.06"/>
+  <line x1="80" y1="420" x2="460" y2="420" stroke="#ffffff" stroke-width="1.5" opacity="0.05"/>
+
+  <!-- Vertical divider — the handoff moment -->
+  <line x1="520" y1="120" x2="520" y2="480" stroke="#dc2626" stroke-width="1" opacity="0.4"/>
+
+  <!-- Right side — signal breaking apart, lines fragment and drift -->
+  <!-- Fragmented lines, each slightly displaced and fading -->
+  <line x1="540" y1="178" x2="680" y2="174" stroke="#dc2626" stroke-width="1.5" opacity="0.35"/>
+  <line x1="540" y1="198" x2="720" y2="208" stroke="#dc2626" stroke-width="1" opacity="0.25"/>
+  <line x1="540" y1="218" x2="700" y2="228" stroke="#dc2626" stroke-width="1.5" opacity="0.3"/>
+  <line x1="540" y1="238" x2="660" y2="252" stroke="#dc2626" stroke-width="1" opacity="0.2"/>
+  <line x1="540" y1="258" x2="740" y2="248" stroke="#dc2626" stroke-width="1.5" opacity="0.28"/>
+  <line x1="540" y1="278" x2="690" y2="296" stroke="#dc2626" stroke-width="2" opacity="0.4"/>
+  <line x1="540" y1="298" x2="760" y2="284" stroke="#dc2626" stroke-width="1" opacity="0.2"/>
+  <line x1="540" y1="318" x2="700" y2="336" stroke="#dc2626" stroke-width="1.5" opacity="0.3"/>
+  <line x1="540" y1="338" x2="650" y2="360" stroke="#dc2626" stroke-width="1" opacity="0.18"/>
+  <line x1="540" y1="358" x2="710" y2="372" stroke="#dc2626" stroke-width="1.5" opacity="0.25"/>
+  <line x1="540" y1="378" x2="760" y2="358" stroke="#dc2626" stroke-width="1" opacity="0.2"/>
+  <line x1="540" y1="398" x2="680" y2="418" stroke="#dc2626" stroke-width="1.5" opacity="0.22"/>
+  <line x1="540" y1="418" x2="700" y2="402" stroke="#dc2626" stroke-width="1" opacity="0.15"/>
+
+  <!-- Further fragmentation - right half -->
+  <line x1="740" y1="168" x2="920" y2="148" stroke="#dc2626" stroke-width="1" opacity="0.12"/>
+  <line x1="760" y1="210" x2="980" y2="232" stroke="#dc2626" stroke-width="0.5" opacity="0.1"/>
+  <line x1="700" y1="254" x2="900" y2="280" stroke="#dc2626" stroke-width="1" opacity="0.14"/>
+  <line x1="740" y1="296" x2="1000" y2="260" stroke="#dc2626" stroke-width="0.5" opacity="0.08"/>
+  <line x1="760" y1="342" x2="940" y2="370" stroke="#dc2626" stroke-width="1" opacity="0.12"/>
+  <line x1="700" y1="390" x2="860" y2="420" stroke="#dc2626" stroke-width="0.5" opacity="0.1"/>
+  <line x1="710" y1="424" x2="950" y2="400" stroke="#dc2626" stroke-width="1" opacity="0.08"/>
+
+  <!-- Small bright dot at the break point -->
+  <circle cx="520" cy="298" r="3" fill="#dc2626" opacity="0.9"/>
+  <circle cx="520" cy="298" r="12" fill="#dc2626" opacity="0.08" filter="url(#blurSm)"/>
+
+  <!-- Text -->
+  <text x="80" y="538" font-family="system-ui,-apple-system,sans-serif" font-size="11" font-weight="400" fill="#4b5563" letter-spacing="0.14em">RIFFT · DEBUGGING GUIDE</text>
+  <text x="80" y="572" font-family="system-ui,-apple-system,sans-serif" font-size="22" font-weight="500" fill="#e5e7eb" letter-spacing="-0.02em">How to debug a CrewAI agent pipeline failure</text>
+</svg>

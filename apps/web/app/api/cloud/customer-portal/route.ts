@@ -32,7 +32,11 @@ export async function POST(request: Request) {
   });
 
   if (!projectResponse.ok) {
-    return NextResponse.json({ error: "cloud_context_unavailable" }, { status: 500 });
+    const projectError = (await projectResponse.json().catch(() => ({}))) as { error?: string };
+    return NextResponse.json(
+      { error: projectError.error ?? "cloud_context_unavailable" },
+      { status: projectResponse.status === 401 ? 401 : projectResponse.status === 403 ? 403 : 500 },
+    );
   }
 
   const project = (await projectResponse.json()) as ProjectResponse;
@@ -56,7 +60,12 @@ export async function POST(request: Request) {
   });
 
   if (!portalResponse.ok) {
-    return NextResponse.json({ error: "portal_unavailable" }, { status: 500 });
+    const portalError = (await portalResponse.json().catch(() => ({}))) as { error?: string };
+    const status =
+      portalResponse.status === 401 || portalResponse.status === 403 || portalResponse.status === 404
+        ? portalResponse.status
+        : 500;
+    return NextResponse.json({ error: portalError.error ?? "portal_unavailable" }, { status });
   }
 
   const data = (await portalResponse.json()) as { url?: string };

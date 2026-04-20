@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, BookOpen } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -24,8 +25,8 @@ export const metadata: Metadata = {
 
 export default function BlogIndexPage() {
   return (
-    <div className="min-h-screen bg-background px-6 py-6 lg:px-8">
-      <div className="mx-auto max-w-5xl space-y-10">
+    <div className="min-h-screen bg-background px-6 py-8 lg:px-8 lg:py-10">
+      <div className="mx-auto max-w-[1200px] space-y-10">
         <PublicNav badge="Blog" />
 
         <section className="space-y-4">
@@ -42,7 +43,16 @@ export default function BlogIndexPage() {
 
         <section className="grid gap-6">
           {blogPosts.map((post) => (
-            <Card key={post.slug} className="rounded-3xl">
+            <Card key={post.slug} className="overflow-hidden rounded-3xl">
+              <div className="border-b border-border/70 bg-muted/20">
+                <Image
+                  src={post.image}
+                  alt={post.title}
+                  width={1200}
+                  height={630}
+                  className="h-auto w-full"
+                />
+              </div>
               <CardHeader className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                   <span>{post.publishedAt}</span>
