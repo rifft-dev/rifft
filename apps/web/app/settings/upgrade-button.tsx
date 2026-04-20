@@ -33,6 +33,28 @@ const PLANS = {
 
 type PlanKey = keyof typeof PLANS;
 
+const getCheckoutErrorMessage = (error?: string) => {
+  switch (error) {
+    case "unauthorized":
+      return "Your session expired. Sign in again to upgrade this workspace.";
+    case "forbidden":
+      return "Only the billing owner can upgrade this account.";
+    case "cloud_api_unreachable":
+    case "cloud_context_unavailable":
+      return "Rifft could not reach the cloud service right now. Please try again in a moment.";
+    case "stripe_not_configured":
+      return "Billing upgrades are not configured right now.";
+    case "price_not_configured":
+      return "This upgrade plan is temporarily unavailable.";
+    case "missing_account_id":
+      return "Billing is not configured for this workspace yet.";
+    case "missing_checkout_url":
+      return "Rifft could not open Stripe checkout right now. Please try again shortly.";
+    default:
+      return "Could not open Stripe checkout";
+  }
+};
+
 export function UpgradeButton({
   accountId,
   userEmail,
@@ -73,7 +95,7 @@ export function UpgradeButton({
 
       const data = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
       if (!response.ok || !data.url) {
-        throw new Error(data.error ?? "Could not create Stripe checkout");
+        throw new Error(getCheckoutErrorMessage(data.error));
       }
 
       window.location.href = data.url;

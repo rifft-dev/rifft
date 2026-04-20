@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveActiveProject } from "@/lib/cloud-context";
+import { getCurrentProjectCookieMutation } from "@/lib/cloud-context-core";
 import { activeProjectCookieName } from "@/lib/project-cookie";
 
 export async function GET() {
@@ -9,8 +10,9 @@ export async function GET() {
     hasCloudProjects: resolution.hasCloudProjects,
   });
 
-  if (resolution.projectId && resolution.repaired) {
-    response.cookies.set(activeProjectCookieName, resolution.projectId, {
+  const cookieMutation = getCurrentProjectCookieMutation(resolution);
+  if (cookieMutation.kind === "set") {
+    response.cookies.set(activeProjectCookieName, cookieMutation.projectId, {
       httpOnly: false,
       maxAge: 60 * 60 * 24 * 30,
       path: "/",
@@ -19,7 +21,7 @@ export async function GET() {
     });
   }
 
-  if (!resolution.projectId && resolution.preferredProjectId) {
+  if (cookieMutation.kind === "delete") {
     response.cookies.delete(activeProjectCookieName);
   }
 

@@ -1,6 +1,4 @@
 import type { Metadata } from "next";
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -86,11 +84,6 @@ export default async function HomePage({
   const params = searchParams ? await searchParams : {};
   const nextPath = typeof params.next === "string" ? params.next : "/onboarding";
   const planIntent = typeof params.plan === "string" ? params.plan : null;
-  const accessToken = (await cookies()).get("rifft_access_token")?.value ?? null;
-
-  if (accessToken) {
-    redirect(`/bootstrap?next=${encodeURIComponent(nextPath)}`);
-  }
 
   const structuredData = {
     "@context": "https://schema.org",

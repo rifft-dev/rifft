@@ -404,12 +404,17 @@ app.post("/projects", async (request, reply) => {
     name: user.name,
   });
 
-  let activeProjectId = project.id;
-  if (user.email) {
-    activeProjectId = (await resolvedDeps.consumePendingInvites(user.id, user.email)) ?? project.id;
-  }
+  const invitedProjectId = user.email
+    ? await resolvedDeps.consumePendingInvites(user.id, user.email)
+    : null;
 
-  return { project, active_project_id: activeProjectId };
+  const activeProjectId = project.id;
+
+  return {
+    project,
+    active_project_id: activeProjectId,
+    invited_project_id: invitedProjectId,
+  };
   });
 
 app.patch("/projects/:id", async (request, reply) => {

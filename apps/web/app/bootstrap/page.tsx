@@ -19,7 +19,7 @@ type BootstrapResponse = {
 export default function BootstrapPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { accessToken, user } = useAuth();
+  const { accessToken, user, isLoading } = useAuth();
   const [status, setStatus] = useState("Preparing your first cloud workspace…");
   const [isRetrying, setIsRetrying] = useState(false);
   const [hasFailed, setHasFailed] = useState(false);
@@ -27,6 +27,16 @@ export default function BootstrapPage() {
   const nextPath = searchParams.get("next") ?? "/onboarding";
   const reason = searchParams.get("reason") ?? "workspace";
   const isSessionIssue = reason === "session";
+
+  useEffect(() => {
+    if (isLoading) {
+      return;
+    }
+
+    if (!user || !accessToken) {
+      router.replace(`/auth?next=${encodeURIComponent(nextPath)}`);
+    }
+  }, [accessToken, isLoading, nextPath, router, user]);
 
   useEffect(() => {
     if (!user || !accessToken) {

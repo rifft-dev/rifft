@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { accessTokenCookieName } from "@/lib/project-cookie";
+import { accessTokenCookieName, activeProjectCookieName } from "@/lib/project-cookie";
 
 const oneWeekInSeconds = 60 * 60 * 24 * 7;
 
@@ -13,6 +13,7 @@ export async function POST(request: Request) {
 
   if (!accessToken) {
     cookieStore.delete(accessTokenCookieName);
+    cookieStore.delete(activeProjectCookieName);
     return NextResponse.json({ ok: true, cleared: true });
   }
 
@@ -26,4 +27,3 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ ok: true });
 }
-

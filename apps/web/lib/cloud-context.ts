@@ -1,18 +1,15 @@
 import { cookies } from "next/headers";
 import { activeProjectCookieName, accessTokenCookieName } from "@/lib/project-cookie";
+import {
+  resolveActiveProjectFromProjects,
+  type ActiveProjectResolution,
+} from "@/lib/cloud-context-core";
 
 const apiBaseUrl =
   process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 type CloudProjectsResponse = {
   projects?: Array<{ id: string }>;
-};
-
-export type ActiveProjectResolution = {
-  projectId: string | null;
-  preferredProjectId: string | null;
-  repaired: boolean;
-  hasCloudProjects: boolean;
 };
 
 export const getAccessTokenFromCookies = async () => {
@@ -26,12 +23,11 @@ export const resolveActiveProject = async (): Promise<ActiveProjectResolution> =
   const accessToken = cookieStore.get(accessTokenCookieName)?.value ?? null;
 
   if (!accessToken) {
-    return {
-      projectId: preferredProjectId ?? "default",
+    return resolveActiveProjectFromProjects({
       preferredProjectId,
-      repaired: false,
-      hasCloudProjects: false,
-    };
+      projects: null,
+      state: "unauthenticated",
+    });
   }
 
   let response: Response;
@@ -43,49 +39,27 @@ export const resolveActiveProject = async (): Promise<ActiveProjectResolution> =
       },
     });
   } catch {
-    return {
-      projectId: preferredProjectId ?? "default",
+    return resolveActiveProjectFromProjects({
       preferredProjectId,
-      repaired: false,
-      hasCloudProjects: false,
-    };
+      projects: null,
+      state: "unavailable",
+    });
   }
 
   if (!response.ok) {
-    return {
-      projectId: preferredProjectId ?? "default",
+    return resolveActiveProjectFromProjects({
       preferredProjectId,
-      repaired: false,
-      hasCloudProjects: false,
-    };
+      projects: null,
+      state: "unavailable",
+    });
   }
 
   const body = (await response.json()) as CloudProjectsResponse;
-  const projects = body.projects ?? [];
-  if (projects.length === 0) {
-    return {
-      projectId: null,
-      preferredProjectId,
-      repaired: false,
-      hasCloudProjects: false,
-    };
-  }
-
-  if (preferredProjectId && projects.some((project) => project.id === preferredProjectId)) {
-    return {
-      projectId: preferredProjectId,
-      preferredProjectId,
-      repaired: false,
-      hasCloudProjects: true,
-    };
-  }
-
-  return {
-    projectId: projects[0]?.id ?? preferredProjectId ?? null,
+  return resolveActiveProjectFromProjects({
     preferredProjectId,
-    repaired: true,
-    hasCloudProjects: true,
-  };
+    projects: body.projects ?? [],
+    state: "loaded",
+  });
 };
 
 export const resolveActiveProjectId = async () => {

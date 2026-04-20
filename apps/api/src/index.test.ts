@@ -412,7 +412,7 @@ test("POST /cloud/bootstrap rejects unauthenticated requests", async () => {
   }
 });
 
-test("POST /cloud/bootstrap prefers the invited workspace when a pending invite is consumed", async () => {
+test("POST /cloud/bootstrap keeps the bootstrapped workspace active even when a pending invite is consumed", async () => {
   let consumeCall:
     | {
         userId: string;
@@ -479,7 +479,8 @@ test("POST /cloud/bootstrap prefers the invited workspace when a pending invite 
         created_at: "2026-04-20T00:00:00.000Z",
         updated_at: "2026-04-20T00:00:00.000Z",
       },
-      active_project_id: "invited-project",
+      active_project_id: "bootstrap-project",
+      invited_project_id: "invited-project",
     });
     assert.deepEqual(consumeCall, {
       userId: "user-1",
@@ -528,6 +529,7 @@ test("POST /cloud/bootstrap falls back to the bootstrapped workspace when no pen
 
     assert.equal(response.statusCode, 200);
     assert.equal(response.json().active_project_id, "bootstrap-project");
+    assert.equal(response.json().invited_project_id, null);
   } finally {
     await app.close();
   }
@@ -576,6 +578,7 @@ test("POST /cloud/bootstrap does not attempt invite consumption when the user ha
 
     assert.equal(response.statusCode, 200);
     assert.equal(response.json().active_project_id, "bootstrap-project");
+    assert.equal(response.json().invited_project_id, null);
     assert.equal(consumeCalled, false);
   } finally {
     await app.close();

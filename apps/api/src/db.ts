@@ -5,13 +5,18 @@ const clickhouseUrl = process.env.CLICKHOUSE_URL ?? "http://localhost:8123";
 const clickhouseUser = process.env.CLICKHOUSE_USER ?? "default";
 const clickhousePassword = process.env.CLICKHOUSE_PASSWORD ?? "";
 
-if (!databaseUrl) {
-  throw new Error("DATABASE_URL must be set");
-}
+const missingDatabaseUrlError = () => new Error("DATABASE_URL must be set");
 
-export const pgPool = new Pool({
-  connectionString: databaseUrl,
-});
+export const pgPool = databaseUrl
+  ? new Pool({
+      connectionString: databaseUrl,
+    })
+  : ({
+      query: async () => {
+        throw missingDatabaseUrlError();
+      },
+      end: async () => undefined,
+    } as unknown as Pool);
 
 type ClickHouseRow = Record<string, unknown>;
 
