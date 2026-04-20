@@ -49,6 +49,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { saveForkDraft as persistForkDraft } from "../../lib/client-api";
 import { formatCurrency } from "@/lib/utils";
 import type { AgentDetail, ForkDraft, TraceDetail, TraceGraph, TraceLiveSnapshot, TraceTimeline } from "../../lib/api-types";
+import { FailureExplanationCard } from "./failure-explanation-card";
 
 type AgentRecord = {
   agentId: string;
@@ -61,6 +62,7 @@ type Props = {
   timeline: TraceTimeline;
   agentDetails: AgentRecord[];
   initialForkDrafts: ForkDraft[];
+  canRegenerateFailureExplanation: boolean;
 };
 
 type LiveState = {
@@ -233,6 +235,7 @@ export function InteractiveTraceDetail({
   timeline: initialTimeline,
   agentDetails,
   initialForkDrafts,
+  canRegenerateFailureExplanation,
 }: Props) {
   const [trace, setTrace] = useState<TraceDetail>(initialTrace);
   const [graph, setGraph] = useState<TraceGraph>(initialGraph);
@@ -810,6 +813,12 @@ const [forkSaved, setForkSaved] = useState(false);
           </div>
 
           <div className="space-y-4">
+            <FailureExplanationCard
+              traceId={trace.trace_id}
+              canRegenerate={canRegenerateFailureExplanation}
+              hasFatalFailure={trace.mast_failures.some((failure) => failure.severity === "fatal")}
+            />
+
             <Card className="rounded-3xl border-destructive/30 bg-gradient-to-br from-destructive/8 via-card to-card shadow-md ring-1 ring-destructive/10">
               <CardHeader>
                 <div className="flex items-center justify-between gap-3">

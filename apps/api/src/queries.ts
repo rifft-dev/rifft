@@ -183,6 +183,18 @@ export type ProjectAlertSettings = {
   recent_deliveries: ProjectAlertDeliveryRecord[];
 };
 
+export type TraceFailureExplanation = {
+  trace_id: string;
+  project_id: string;
+  summary: string;
+  evidence: string[];
+  recommended_fix: string;
+  confidence: "high" | "medium" | "low";
+  model: string;
+  generated_at: string;
+  updated_at: string;
+};
+
 type TraceComparisonSummary = {
   baseline: TraceBaselineRecord | null;
   current_trace_id: string;
@@ -333,6 +345,7 @@ let apiKeysTableEnsured = false;
 let subscriptionsTableEnsured = false;
 let traceBaselinesTableEnsured = false;
 let projectAlertsEnsured = false;
+let traceFailureExplanationsEnsured = false;
 
 const ensureForkDraftsTable = async () => {
   if (forkDraftsTableEnsured) {
@@ -544,6 +557,34 @@ const ensureProjectAlerts = async () => {
   `);
 
   projectAlertsEnsured = true;
+};
+
+const ensureTraceFailureExplanations = async () => {
+  if (traceFailureExplanationsEnsured) {
+    return;
+  }
+
+  await ensureCloudMemberships();
+
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS trace_failure_explanations (
+      trace_id TEXT PRIMARY KEY REFERENCES traces(trace_id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      summary TEXT NOT NULL,
+      evidence JSONB NOT NULL,
+      recommended_fix TEXT NOT NULL,
+      confidence TEXT NOT NULL DEFAULT 'medium',
+      model TEXT NOT NULL,
+      generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pgPool.query(`
+    CREATE INDEX IF NOT EXISTS trace_failure_explanations_project_updated_idx
+      ON trace_failure_explanations (project_id, updated_at DESC)
+  `);
+
+  traceFailureExplanationsEnsured = true;
 };
 
 const ensureTraceBaselinesTable = async () => {
@@ -976,6 +1017,8 @@ const getCurrentPlanKeyForProject = async (projectId: string) => {
 
   return subscription.plan_key === "scale" ? "scale" : subscription.plan_key === "pro" ? "pro" : "free";
 };
+
+export const getProjectPlanKey = async (projectId: string) => getCurrentPlanKeyForProject(projectId);
 
 const isActiveSubscriptionStatus = (status: string) => ["active", "trialing"].includes(status);
 
@@ -1941,6 +1984,98 @@ export const recordProjectAlertDelivery = async ({
       error ?? null,
     ],
   );
+};
+
+export const getStoredTraceFailureExplanation = async (
+  traceId: string,
+): Promise<TraceFailureExplanation | null> => {
+  await ensureTraceFailureExplanations();
+
+  const result = await pgPool.query<{
+    trace_id: string;
+    project_id: string;
+    summary: string;
+    evidence: unknown;
+    recommended_fix: string;
+    confidence: string;
+    model: string;
+    generated_at: string | Date;
+    updated_at: string | Date;
+  }>(
+    `
+      SELECT trace_id, project_id, summary, evidence, recommended_fix, confidence, model, generated_at, updated_at
+      FROM trace_failure_explanations
+      WHERE trace_id = $1
+      LIMIT 1
+    `,
+    [traceId],
+  );
+
+  if (result.rowCount === 0 || !result.rows[0]) {
+    return null;
+  }
+
+  const row = result.rows[0];
+  return {
+    trace_id: row.trace_id,
+    project_id: row.project_id,
+    summary: row.summary,
+    evidence: Array.isArray(row.evidence)
+      ? row.evidence.map((item) => String(item))
+      : parseJson<string[]>(JSON.stringify(row.evidence ?? []), []),
+    recommended_fix: row.recommended_fix,
+    confidence:
+      row.confidence === "high" ? "high" : row.confidence === "low" ? "low" : "medium",
+    model: row.model,
+    generated_at: toIsoOrNull(row.generated_at) ?? new Date().toISOString(),
+    updated_at: toIsoOrNull(row.updated_at) ?? new Date().toISOString(),
+  };
+};
+
+export const upsertTraceFailureExplanation = async ({
+  traceId,
+  projectId,
+  summary,
+  evidence,
+  recommendedFix,
+  confidence,
+  model,
+}: {
+  traceId: string;
+  projectId: string;
+  summary: string;
+  evidence: string[];
+  recommendedFix: string;
+  confidence: "high" | "medium" | "low";
+  model: string;
+}) => {
+  await ensureTraceFailureExplanations();
+
+  await pgPool.query(
+    `
+      INSERT INTO trace_failure_explanations (
+        trace_id,
+        project_id,
+        summary,
+        evidence,
+        recommended_fix,
+        confidence,
+        model
+      )
+      VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+      ON CONFLICT (trace_id) DO UPDATE SET
+        project_id = EXCLUDED.project_id,
+        summary = EXCLUDED.summary,
+        evidence = EXCLUDED.evidence,
+        recommended_fix = EXCLUDED.recommended_fix,
+        confidence = EXCLUDED.confidence,
+        model = EXCLUDED.model,
+        updated_at = NOW()
+    `,
+    [traceId, projectId, summary, JSON.stringify(evidence), recommendedFix, confidence, model],
+  );
+
+  return getStoredTraceFailureExplanation(traceId);
 };
 
 export const syncStripeSubscription = async (

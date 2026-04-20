@@ -217,6 +217,18 @@ export type TraceDetail = {
   }>;
 };
 
+export type TraceFailureExplanation = {
+  trace_id: string;
+  project_id: string;
+  summary: string;
+  evidence: string[];
+  recommended_fix: string;
+  confidence: "high" | "medium" | "low";
+  model: string;
+  generated_at: string;
+  updated_at: string;
+};
+
 export type TraceLiveSnapshot = {
   trace: TraceDetail;
   graph: TraceGraph;

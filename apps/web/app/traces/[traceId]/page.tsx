@@ -294,6 +294,7 @@ export default async function TraceDetailPage({
         </section>
         <InteractiveTraceDetail
           agentDetails={agentDetails}
+          canRegenerateFailureExplanation={projectSettings.permissions.can_update_settings}
           initialForkDrafts={forkDrafts.drafts}
           graph={graph}
           timeline={timeline}

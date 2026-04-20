@@ -39,9 +39,11 @@ import {
   updateProjectAlertSettings,
   getProjectAlertDeliveryTargets,
   recordProjectAlertDelivery,
+  getStoredTraceFailureExplanation,
+  upsertTraceFailureExplanation,
+  getProjectPlanKey,
   consumePendingInvites,
   isPrimaryWorkspace,
-  type ProjectAlertChannel,
 } from "./queries.js";
 
 const port = Number(process.env.PORT ?? 4000);
@@ -248,6 +250,228 @@ const sendAlertEmail = async ({
   }
 };
 
+const anthropicModel = process.env.ANTHROPIC_MODEL ?? "claude-3-5-sonnet-20241022";
+
+const truncateText = (value: string, maxLength: number) =>
+  value.length <= maxLength ? value : `${value.slice(0, maxLength)}…`;
+
+const compactJson = (value: unknown, maxLength = 1200) =>
+  truncateText(
+    typeof value === "string" ? value : (JSON.stringify(value, null, 2) ?? "null"),
+    maxLength,
+  );
+
+const extractJsonObject = (value: string) => {
+  const fenced = value.match(/```json\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    return fenced[1].trim();
+  }
+
+  const firstBrace = value.indexOf("{");
+  const lastBrace = value.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return value.slice(firstBrace, lastBrace + 1);
+  }
+
+  return value.trim();
+};
+
+const buildFailureExplanationPromptContext = async (traceId: string) => {
+  const trace = await getTrace(traceId);
+  if (!trace) {
+    return null;
+  }
+
+  const fatalFailures = trace.mast_failures.filter(
+    (failure: { severity: string; mode: string; agent_id: string | null; explanation: string }) =>
+      failure.severity === "fatal",
+  );
+  if (fatalFailures.length === 0) {
+    return {
+      trace,
+      context: null,
+    };
+  }
+
+  const relevantAgentIds = [...new Set([
+    trace.causal_attribution.root_cause_agent_id,
+    trace.causal_attribution.failing_agent_id,
+    ...fatalFailures.map((failure: { agent_id: string | null }) => failure.agent_id),
+  ].filter((value): value is string => Boolean(value)))].slice(0, 3);
+
+  const agentDetails = await Promise.all(
+    relevantAgentIds.map(async (agentId) => ({
+      agent_id: agentId,
+      detail: await getAgentDetail(traceId, agentId),
+    })),
+  );
+  const hydratedAgentDetails = agentDetails.filter(
+    (
+      entry,
+    ): entry is {
+      agent_id: string;
+      detail: NonNullable<Awaited<ReturnType<typeof getAgentDetail>>>;
+    } => entry.detail !== null,
+  );
+
+  const highlightedMessages = trace.communication_spans
+    .filter(
+      (span) =>
+        relevantAgentIds.includes(span.source_agent_id) ||
+        relevantAgentIds.includes(span.target_agent_id),
+    )
+    .slice(-8)
+    .map((span) => ({
+      span_id: span.span_id,
+      from: span.source_agent_id,
+      to: span.target_agent_id,
+      status: span.status,
+      timestamp: span.start_time,
+      payload_preview: compactJson(span.message, 800),
+    }));
+
+  return {
+    trace,
+    context: {
+      trace: {
+        trace_id: trace.trace_id,
+        root_span_name: trace.root_span_name,
+        started_at: trace.started_at,
+        duration_ms: trace.duration_ms,
+        total_cost_usd: trace.total_cost_usd,
+        status: trace.status,
+        fatal_failures: fatalFailures.map((failure: { mode: string; agent_id: string | null; explanation: string }) => ({
+          mode: failure.mode,
+          agent_id: failure.agent_id,
+          explanation: failure.explanation,
+        })),
+        causal_attribution: trace.causal_attribution,
+      },
+      agents: hydratedAgentDetails.map(({ agent_id, detail }) => ({
+        agent_id,
+        summary: detail.summary,
+        mast_failures: detail.mast_failures,
+        decision_context: detail.decision_context
+          ? compactJson(detail.decision_context, 1000)
+          : null,
+        messages: detail.messages.slice(-4).map((message) => ({
+          span_id: message.span_id,
+          from: message.sender,
+          to: message.receiver,
+          payload_preview: compactJson(message.payload, 700),
+        })),
+        tool_calls: detail.tool_calls.slice(-3).map((toolCall) => ({
+          span_id: toolCall.span_id,
+          tool_name: toolCall.tool_name,
+          input_preview: compactJson(toolCall.input, 500),
+          output_preview: compactJson(toolCall.output, 500),
+        })),
+      })),
+      highlighted_messages: highlightedMessages,
+    },
+  };
+};
+
+const generateFailureExplanationWithAnthropic = async (
+  traceId: string,
+): Promise<
+  | {
+      trace: NonNullable<Awaited<ReturnType<typeof getTrace>>>;
+      explanation: {
+        summary: string;
+        evidence: string[];
+        recommended_fix: string;
+        confidence: "high" | "medium" | "low";
+        model: string;
+      };
+    }
+  | null
+> => {
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  if (!anthropicApiKey) {
+    throw new Error("anthropic_not_configured");
+  }
+
+  const promptContext = await buildFailureExplanationPromptContext(traceId);
+  if (!promptContext) {
+    return null;
+  }
+
+  if (!promptContext.context) {
+    throw new Error("no_fatal_failure");
+  }
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": anthropicApiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: anthropicModel,
+      max_tokens: 700,
+      system:
+        "You are Rifft, an incident analysis assistant for multi-agent traces. Produce concise, evidence-grounded JSON only. Do not invent facts not present in the trace context.",
+      messages: [
+        {
+          role: "user",
+          content: `Given this trace context, explain the specific fatal failure in plain English for a developer.\n\nReturn strict JSON with this shape:\n{"summary": string, "evidence": string[], "recommended_fix": string, "confidence": "high" | "medium" | "low"}\n\nRules:\n- summary: one paragraph, under 120 words, trace-specific\n- evidence: 2 to 4 bullets, each referencing concrete agents, handoffs, tool calls, or payloads from the trace\n- recommended_fix: one concrete next engineering change, under 60 words\n- confidence: low if the evidence is incomplete or ambiguous\n- Avoid generic taxonomy definitions unless they help explain this exact trace\n- If a payload preview is truncated, say that the preview was truncated rather than assuming details\n\nTrace context:\n${JSON.stringify(promptContext.context, null, 2)}`,
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    throw new Error(`anthropic_request_failed:${response.status}:${errorBody}`);
+  }
+
+  const body = (await response.json()) as {
+    content?: Array<{ type?: string; text?: string }>;
+  };
+  const text = body.content
+    ?.filter((item) => item.type === "text" && typeof item.text === "string")
+    .map((item) => item.text)
+    .join("\n")
+    .trim();
+
+  if (!text) {
+    throw new Error("anthropic_empty_response");
+  }
+
+  const parsed = JSON.parse(extractJsonObject(text)) as {
+    summary?: string;
+    evidence?: string[];
+    recommended_fix?: string;
+    confidence?: string;
+  };
+
+  if (
+    typeof parsed.summary !== "string" ||
+    !Array.isArray(parsed.evidence) ||
+    typeof parsed.recommended_fix !== "string"
+  ) {
+    throw new Error("anthropic_invalid_response");
+  }
+
+  return {
+    trace: promptContext.trace,
+    explanation: {
+      summary: parsed.summary.trim(),
+      evidence: parsed.evidence.map((item) => String(item).trim()).filter(Boolean).slice(0, 4),
+      recommended_fix: parsed.recommended_fix.trim(),
+      confidence:
+        parsed.confidence === "high"
+          ? "high"
+          : parsed.confidence === "low"
+            ? "low"
+            : "medium",
+      model: anthropicModel,
+    },
+  };
+};
+
 type AppDeps = {
   getAuthenticatedUser: typeof getAuthenticatedUser;
   getAccessibleProject: typeof getAccessibleProject;
@@ -266,6 +490,10 @@ type AppDeps = {
   updateProjectAlertSettings: typeof updateProjectAlertSettings;
   getProjectAlertDeliveryTargets: typeof getProjectAlertDeliveryTargets;
   recordProjectAlertDelivery: typeof recordProjectAlertDelivery;
+  getStoredTraceFailureExplanation: typeof getStoredTraceFailureExplanation;
+  upsertTraceFailureExplanation: typeof upsertTraceFailureExplanation;
+  getProjectPlanKey: typeof getProjectPlanKey;
+  generateFailureExplanation: typeof generateFailureExplanationWithAnthropic;
   pgQuery: (query: string, params?: unknown[]) => Promise<unknown>;
 };
 
@@ -291,6 +519,10 @@ export const createApp = (
     updateProjectAlertSettings,
     getProjectAlertDeliveryTargets,
     recordProjectAlertDelivery,
+    getStoredTraceFailureExplanation,
+    upsertTraceFailureExplanation,
+    getProjectPlanKey,
+    generateFailureExplanation: generateFailureExplanationWithAnthropic,
     pgQuery: pgPool.query.bind(pgPool),
     ...deps,
   };
@@ -1178,6 +1410,125 @@ app.get("/traces/:traceId/agents/:agentId", async (request, reply) => {
   }
 
   return detail;
+});
+
+app.get("/traces/:traceId/failure-explanation", async (request, reply) => {
+  const traceId = (request.params as { traceId: string }).traceId;
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (!(await canAccessTrace(user, traceId))) {
+    reply.code(404);
+    return { error: "not_found" };
+  }
+
+  const trace = await getTrace(traceId);
+  if (!trace) {
+    reply.code(404);
+    return { error: "not_found" };
+  }
+
+  const planKey = await resolvedDeps.getProjectPlanKey(trace.project_id);
+  if (planKey === "free") {
+    reply.code(403);
+    return { error: "failure_explanations_require_paid_plan" };
+  }
+
+  const hasFatalFailure = trace.mast_failures.some(
+    (failure: { severity: string }) => failure.severity === "fatal",
+  );
+  if (!hasFatalFailure) {
+    return { explanation: null };
+  }
+
+  const stored = await resolvedDeps.getStoredTraceFailureExplanation(traceId);
+  if (stored) {
+    return { explanation: stored };
+  }
+
+  try {
+    const generated = await resolvedDeps.generateFailureExplanation(traceId);
+    if (!generated) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+
+    const explanation = await resolvedDeps.upsertTraceFailureExplanation({
+      traceId,
+      projectId: generated.trace.project_id,
+      summary: generated.explanation.summary,
+      evidence: generated.explanation.evidence,
+      recommendedFix: generated.explanation.recommended_fix,
+      confidence: generated.explanation.confidence,
+      model: generated.explanation.model,
+    });
+
+    return { explanation };
+  } catch (error) {
+    if (error instanceof Error && error.message === "anthropic_not_configured") {
+      reply.code(500);
+      return { error: "failure_explanations_not_configured" };
+    }
+    if (error instanceof Error && error.message === "no_fatal_failure") {
+      return { explanation: null };
+    }
+    reply.code(502);
+    return { error: "failure_explanation_unavailable" };
+  }
+});
+
+app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
+  const traceId = (request.params as { traceId: string }).traceId;
+  const user = await getAuthenticatedUser(request.headers.authorization);
+  if (!(await canAccessTrace(user, traceId))) {
+    reply.code(404);
+    return { error: "not_found" };
+  }
+
+  const trace = await getTrace(traceId);
+  if (!trace) {
+    reply.code(404);
+    return { error: "not_found" };
+  }
+
+  const planKey = await resolvedDeps.getProjectPlanKey(trace.project_id);
+  if (planKey === "free") {
+    reply.code(403);
+    return { error: "failure_explanations_require_paid_plan" };
+  }
+
+  const hasFatalFailure = trace.mast_failures.some(
+    (failure: { severity: string }) => failure.severity === "fatal",
+  );
+  if (!hasFatalFailure) {
+    reply.code(422);
+    return { error: "no_fatal_failure" };
+  }
+
+  try {
+    const generated = await resolvedDeps.generateFailureExplanation(traceId);
+    if (!generated) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+
+    const explanation = await resolvedDeps.upsertTraceFailureExplanation({
+      traceId,
+      projectId: generated.trace.project_id,
+      summary: generated.explanation.summary,
+      evidence: generated.explanation.evidence,
+      recommendedFix: generated.explanation.recommended_fix,
+      confidence: generated.explanation.confidence,
+      model: generated.explanation.model,
+    });
+
+    return { explanation };
+  } catch (error) {
+    if (error instanceof Error && error.message === "anthropic_not_configured") {
+      reply.code(500);
+      return { error: "failure_explanations_not_configured" };
+    }
+    reply.code(502);
+    return { error: "failure_explanation_unavailable" };
+  }
 });
 
   const dispatchFatalFailureAlert = async (traceId: string) => {
