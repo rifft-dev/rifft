@@ -73,6 +73,37 @@ export type ProjectUsageSummary = {
   };
 };
 
+export type ProjectAlerts = {
+  available: boolean;
+  plan_key: "free" | "pro" | "scale";
+  fatal_failures_enabled: boolean;
+  slack: {
+    configured: boolean;
+    target: string | null;
+    last_tested_at: string | null;
+    last_alert_at: string | null;
+    last_error: string | null;
+  };
+  email: {
+    configured: boolean;
+    target: string | null;
+    last_tested_at: string | null;
+    last_alert_at: string | null;
+    last_error: string | null;
+  };
+  recent_deliveries: Array<{
+    id: string;
+    project_id: string;
+    channel: "slack" | "email";
+    event_type: "fatal_failure" | "test";
+    status: "sent" | "failed";
+    trace_id: string | null;
+    target: string | null;
+    error: string | null;
+    created_at: string;
+  }>;
+};
+
 export type ProjectInsightsSummary = {
   recent_trace_window: number;
   insights: Array<{

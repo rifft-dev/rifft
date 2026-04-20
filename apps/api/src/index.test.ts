@@ -393,6 +393,220 @@ test("GET /projects/:id/members returns 404 when the project is inaccessible", a
   }
 });
 
+test("GET /projects/:id/alerts returns alert settings for accessible workspaces", async () => {
+  const app = createApp({
+    getAuthenticatedUser: async () => ({
+      id: "owner-1",
+      email: "owner@example.com",
+      name: null,
+    }),
+    getAccessibleProject: async () =>
+      makeAccessibleProject({
+        project_role: "owner",
+        can_update_settings: true,
+      }),
+    getProjectAlertSettings: async () => ({
+      available: true,
+      plan_key: "pro" as const,
+      fatal_failures_enabled: true,
+      slack: {
+        configured: true,
+        target: "hooks.slack.com ••••1234",
+        last_tested_at: null,
+        last_alert_at: null,
+        last_error: null,
+      },
+      email: {
+        configured: true,
+        target: "oncall@example.com",
+        last_tested_at: null,
+        last_alert_at: null,
+        last_error: null,
+      },
+      recent_deliveries: [],
+    }),
+    getProjectAlertDeliveryTargets: async () => ({
+      slack_webhook_url: null,
+      alert_email: null,
+    }),
+  });
+
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/projects/project-1/alerts",
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().fatal_failures_enabled, true);
+    assert.equal(response.json().slack.target, "hooks.slack.com ••••1234");
+  } finally {
+    await app.close();
+  }
+});
+
+test("PATCH /projects/:id/alerts requires a paid plan", async () => {
+  const app = createApp({
+    getAuthenticatedUser: async () => ({
+      id: "owner-1",
+      email: "owner@example.com",
+      name: null,
+    }),
+    getAccessibleProject: async () =>
+      makeAccessibleProject({
+        project_role: "owner",
+        can_update_settings: true,
+      }),
+    getProjectAlertSettings: async () => ({
+      available: false,
+      plan_key: "free" as const,
+      fatal_failures_enabled: false,
+      slack: {
+        configured: false,
+        target: null,
+        last_tested_at: null,
+        last_alert_at: null,
+        last_error: null,
+      },
+      email: {
+        configured: false,
+        target: null,
+        last_tested_at: null,
+        last_alert_at: null,
+        last_error: null,
+      },
+      recent_deliveries: [],
+    }),
+    getProjectAlertDeliveryTargets: async () => ({
+      slack_webhook_url: null,
+      alert_email: null,
+    }),
+  });
+
+  try {
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/projects/project-1/alerts",
+      payload: {
+        fatal_failures_enabled: true,
+        alert_email: "oncall@example.com",
+      },
+    });
+
+    assert.equal(response.statusCode, 403);
+    assert.deepEqual(response.json(), { error: "alerting_requires_paid_plan" });
+  } finally {
+    await app.close();
+  }
+});
+
+test("PATCH /projects/:id/alerts maps missing destinations to 422", async () => {
+  const app = createApp({
+    getAuthenticatedUser: async () => ({
+      id: "owner-1",
+      email: "owner@example.com",
+      name: null,
+    }),
+    getAccessibleProject: async () =>
+      makeAccessibleProject({
+        project_role: "owner",
+        can_update_settings: true,
+      }),
+    getProjectAlertSettings: async () => ({
+      available: true,
+      plan_key: "pro" as const,
+      fatal_failures_enabled: false,
+      slack: {
+        configured: false,
+        target: null,
+        last_tested_at: null,
+        last_alert_at: null,
+        last_error: null,
+      },
+      email: {
+        configured: false,
+        target: null,
+        last_tested_at: null,
+        last_alert_at: null,
+        last_error: null,
+      },
+      recent_deliveries: [],
+    }),
+    updateProjectAlertSettings: async () => {
+      throw new Error("alert_destination_required");
+    },
+  });
+
+  try {
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/projects/project-1/alerts",
+      payload: {
+        fatal_failures_enabled: true,
+      },
+    });
+
+    assert.equal(response.statusCode, 422);
+    assert.deepEqual(response.json(), { error: "alert_destination_required" });
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /projects/:id/alerts/test returns 422 when the requested channel has no destination", async () => {
+  const app = createApp({
+    getAuthenticatedUser: async () => ({
+      id: "owner-1",
+      email: "owner@example.com",
+      name: null,
+    }),
+    getAccessibleProject: async () =>
+      makeAccessibleProject({
+        project_role: "owner",
+        can_update_settings: true,
+      }),
+    getProjectAlertSettings: async () => ({
+      available: true,
+      plan_key: "pro" as const,
+      fatal_failures_enabled: true,
+      slack: {
+        configured: false,
+        target: null,
+        last_tested_at: null,
+        last_alert_at: null,
+        last_error: null,
+      },
+      email: {
+        configured: false,
+        target: null,
+        last_tested_at: null,
+        last_alert_at: null,
+        last_error: null,
+      },
+      recent_deliveries: [],
+    }),
+    getProjectAlertDeliveryTargets: async () => ({
+      slack_webhook_url: null,
+      alert_email: null,
+    }),
+  });
+
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/projects/project-1/alerts/test",
+      payload: {
+        channel: "slack",
+      },
+    });
+
+    assert.equal(response.statusCode, 422);
+    assert.deepEqual(response.json(), { error: "alert_destination_required" });
+  } finally {
+    await app.close();
+  }
+});
+
 test("POST /cloud/bootstrap rejects unauthenticated requests", async () => {
   const app = createApp({
     getAuthenticatedUser: async () => null,

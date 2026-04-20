@@ -148,6 +148,41 @@ type TraceBaselineRecord = {
   trace_status: "ok" | "error" | "unset" | null;
 };
 
+export type ProjectAlertChannel = "slack" | "email";
+
+export type ProjectAlertEventType = "fatal_failure" | "test";
+
+export type ProjectAlertDeliveryStatus = "sent" | "failed";
+
+type ProjectAlertDeliveryRecord = {
+  id: string;
+  project_id: string;
+  channel: ProjectAlertChannel;
+  event_type: ProjectAlertEventType;
+  status: ProjectAlertDeliveryStatus;
+  trace_id: string | null;
+  target: string | null;
+  error: string | null;
+  created_at: string;
+};
+
+type ProjectAlertChannelSettings = {
+  configured: boolean;
+  target: string | null;
+  last_tested_at: string | null;
+  last_alert_at: string | null;
+  last_error: string | null;
+};
+
+export type ProjectAlertSettings = {
+  available: boolean;
+  plan_key: "free" | "pro" | "scale";
+  fatal_failures_enabled: boolean;
+  slack: ProjectAlertChannelSettings;
+  email: ProjectAlertChannelSettings;
+  recent_deliveries: ProjectAlertDeliveryRecord[];
+};
+
 type TraceComparisonSummary = {
   baseline: TraceBaselineRecord | null;
   current_trace_id: string;
@@ -237,6 +272,33 @@ const toNumber = (value: unknown) => {
   return null;
 };
 
+const maskSlackWebhookTarget = (value: string | null) => {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+    const suffix = value.slice(-4);
+    return `${url.host} ••••${suffix}`;
+  } catch {
+    const suffix = value.slice(-4);
+    return `Slack webhook ••••${suffix}`;
+  }
+};
+
+const toIsoOrNull = (value: unknown) => {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  return typeof value === "string" ? value : null;
+};
+
 const median = (values: number[]) => {
   if (values.length === 0) {
     return null;
@@ -270,6 +332,7 @@ let cloudMembershipEnsured = false;
 let apiKeysTableEnsured = false;
 let subscriptionsTableEnsured = false;
 let traceBaselinesTableEnsured = false;
+let projectAlertsEnsured = false;
 
 const ensureForkDraftsTable = async () => {
   if (forkDraftsTableEnsured) {
@@ -441,6 +504,46 @@ const ensureSubscriptionsTable = async () => {
   `);
 
   subscriptionsTableEnsured = true;
+};
+
+const ensureProjectAlerts = async () => {
+  if (projectAlertsEnsured) {
+    return;
+  }
+
+  await ensureSubscriptionsTable();
+
+  await pgPool.query(`
+    ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS fatal_failure_alerts_enabled BOOLEAN NOT NULL DEFAULT FALSE
+  `);
+  await pgPool.query(`
+    ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS slack_webhook_url TEXT
+  `);
+  await pgPool.query(`
+    ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS alert_email TEXT
+  `);
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS project_alert_deliveries (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      channel TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      trace_id TEXT,
+      target_label TEXT,
+      error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pgPool.query(`
+    CREATE INDEX IF NOT EXISTS project_alert_deliveries_project_created_idx
+      ON project_alert_deliveries (project_id, created_at DESC)
+  `);
+
+  projectAlertsEnsured = true;
 };
 
 const ensureTraceBaselinesTable = async () => {
@@ -858,6 +961,20 @@ const getCloudPlanForKey = (planKey: string) => {
   }
 
   return getCloudPlanForRetention(14);
+};
+
+const getCurrentPlanKeyForProject = async (projectId: string) => {
+  const accountId = await getProjectAccountId(projectId);
+  if (!accountId) {
+    return "free" as const;
+  }
+
+  const subscription = await getCurrentSubscriptionForAccount(accountId);
+  if (!subscription || !isActiveSubscriptionStatus(subscription.status)) {
+    return "free" as const;
+  }
+
+  return subscription.plan_key === "scale" ? "scale" : subscription.plan_key === "pro" ? "pro" : "free";
 };
 
 const isActiveSubscriptionStatus = (status: string) => ["active", "trialing"].includes(status);
@@ -1571,6 +1688,259 @@ export const getCloudProjectUsageSummary = async (projectId: string) => {
       over_limit: usedSpans > includedSpans,
     },
   };
+};
+
+const toProjectAlertChannelSettings = ({
+  configured,
+  target,
+  deliveries,
+}: {
+  configured: boolean;
+  target: string | null;
+  deliveries: ProjectAlertDeliveryRecord[];
+}): ProjectAlertChannelSettings => {
+  const latestTest = deliveries.find((delivery) => delivery.event_type === "test") ?? null;
+  const latestAlert = deliveries.find(
+    (delivery) => delivery.event_type === "fatal_failure" && delivery.status === "sent",
+  ) ?? null;
+  const latestFailure = deliveries.find((delivery) => delivery.status === "failed") ?? null;
+
+  return {
+    configured,
+    target,
+    last_tested_at: latestTest?.created_at ?? null,
+    last_alert_at: latestAlert?.created_at ?? null,
+    last_error: latestFailure?.error ?? null,
+  };
+};
+
+export const getProjectAlertSettings = async (projectId: string): Promise<ProjectAlertSettings | null> => {
+  await ensureProjectAlerts();
+
+  const [projectResult, deliveriesResult, planKey] = await Promise.all([
+    pgPool.query<{
+      fatal_failure_alerts_enabled: boolean;
+      slack_webhook_url: string | null;
+      alert_email: string | null;
+    }>(
+      `
+        SELECT fatal_failure_alerts_enabled, slack_webhook_url, alert_email
+        FROM projects
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [projectId],
+    ),
+    pgPool.query<{
+      id: string;
+      channel: string;
+      event_type: string;
+      status: string;
+      trace_id: string | null;
+      target_label: string | null;
+      error: string | null;
+      created_at: string | Date;
+    }>(
+      `
+        SELECT id, channel, event_type, status, trace_id, target_label, error, created_at
+        FROM project_alert_deliveries
+        WHERE project_id = $1
+        ORDER BY created_at DESC
+        LIMIT 8
+      `,
+      [projectId],
+    ),
+    getCurrentPlanKeyForProject(projectId),
+  ]);
+
+  if (projectResult.rowCount === 0 || !projectResult.rows[0]) {
+    return null;
+  }
+
+  const row = projectResult.rows[0];
+  const recentDeliveries: ProjectAlertDeliveryRecord[] = deliveriesResult.rows.map((delivery) => ({
+    id: delivery.id,
+    project_id: projectId,
+    channel: delivery.channel === "email" ? "email" : "slack",
+    event_type: delivery.event_type === "test" ? "test" : "fatal_failure",
+    status: delivery.status === "failed" ? "failed" : "sent",
+    trace_id: delivery.trace_id,
+    target: delivery.target_label,
+    error: delivery.error,
+    created_at: toIsoOrNull(delivery.created_at) ?? new Date().toISOString(),
+  }));
+  const slackDeliveries = recentDeliveries.filter((delivery) => delivery.channel === "slack");
+  const emailDeliveries = recentDeliveries.filter((delivery) => delivery.channel === "email");
+
+  return {
+    available: planKey === "pro" || planKey === "scale",
+    plan_key: planKey,
+    fatal_failures_enabled: Boolean(row.fatal_failure_alerts_enabled),
+    slack: toProjectAlertChannelSettings({
+      configured: Boolean(row.slack_webhook_url),
+      target: maskSlackWebhookTarget(row.slack_webhook_url),
+      deliveries: slackDeliveries,
+    }),
+    email: toProjectAlertChannelSettings({
+      configured: Boolean(row.alert_email),
+      target: row.alert_email ?? null,
+      deliveries: emailDeliveries,
+    }),
+    recent_deliveries: recentDeliveries,
+  };
+};
+
+export const updateProjectAlertSettings = async (
+  projectId: string,
+  updates: {
+    fatal_failures_enabled?: boolean;
+    slack_webhook_url?: string | null;
+    alert_email?: string | null;
+  },
+) => {
+  await ensureProjectAlerts();
+
+  const current = await getProjectAlertSettings(projectId);
+  if (!current) {
+    return null;
+  }
+
+  const nextSlackConfigured =
+    updates.slack_webhook_url !== undefined
+      ? Boolean(updates.slack_webhook_url)
+      : current.slack.configured;
+  const nextEmailConfigured =
+    updates.alert_email !== undefined
+      ? Boolean(updates.alert_email)
+      : current.email.configured;
+  const nextFatalEnabled =
+    updates.fatal_failures_enabled !== undefined
+      ? updates.fatal_failures_enabled
+      : current.fatal_failures_enabled;
+
+  if (nextFatalEnabled && !nextSlackConfigured && !nextEmailConfigured) {
+    throw new Error("alert_destination_required");
+  }
+
+  const assignments: string[] = [];
+  const params: unknown[] = [projectId];
+  let paramIndex = 2;
+
+  if (updates.fatal_failures_enabled !== undefined) {
+    assignments.push(`fatal_failure_alerts_enabled = $${paramIndex}`);
+    params.push(updates.fatal_failures_enabled);
+    paramIndex += 1;
+  }
+
+  if (updates.slack_webhook_url !== undefined) {
+    assignments.push(`slack_webhook_url = $${paramIndex}`);
+    params.push(updates.slack_webhook_url);
+    paramIndex += 1;
+  }
+
+  if (updates.alert_email !== undefined) {
+    assignments.push(`alert_email = $${paramIndex}`);
+    params.push(updates.alert_email);
+    paramIndex += 1;
+  }
+
+  if (assignments.length === 0) {
+    return current;
+  }
+
+  const result = await pgPool.query(
+    `
+      UPDATE projects
+      SET ${assignments.join(", ")},
+          updated_at = NOW()
+      WHERE id = $1
+      RETURNING id
+    `,
+    params,
+  );
+
+  if (result.rowCount === 0) {
+    return null;
+  }
+
+  return getProjectAlertSettings(projectId);
+};
+
+export const getProjectAlertDeliveryTargets = async (projectId: string) => {
+  await ensureProjectAlerts();
+
+  const settings = await getProjectAlertSettings(projectId);
+  if (!settings || !settings.available || !settings.fatal_failures_enabled) {
+    return null;
+  }
+
+  const result = await pgPool.query<{
+    slack_webhook_url: string | null;
+    alert_email: string | null;
+  }>(
+    `
+      SELECT slack_webhook_url, alert_email
+      FROM projects
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [projectId],
+  );
+
+  if (result.rowCount === 0 || !result.rows[0]) {
+    return null;
+  }
+
+  return {
+    slack_webhook_url: result.rows[0].slack_webhook_url ?? null,
+    alert_email: result.rows[0].alert_email ?? null,
+  };
+};
+
+export const recordProjectAlertDelivery = async ({
+  projectId,
+  channel,
+  eventType,
+  status,
+  traceId,
+  targetLabel,
+  error,
+}: {
+  projectId: string;
+  channel: ProjectAlertChannel;
+  eventType: ProjectAlertEventType;
+  status: ProjectAlertDeliveryStatus;
+  traceId?: string | null;
+  targetLabel?: string | null;
+  error?: string | null;
+}) => {
+  await ensureProjectAlerts();
+
+  await pgPool.query(
+    `
+      INSERT INTO project_alert_deliveries (
+        id,
+        project_id,
+        channel,
+        event_type,
+        status,
+        trace_id,
+        target_label,
+        error
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `,
+    [
+      `alert_${randomBytes(12).toString("hex")}`,
+      projectId,
+      channel,
+      eventType,
+      status,
+      traceId ?? null,
+      targetLabel ?? null,
+      error ?? null,
+    ],
+  );
 };
 
 export const syncStripeSubscription = async (

@@ -5,6 +5,7 @@ export type {
   CloudProjectSummary,
   ForkDraft,
   ProjectInsightsSummary,
+  ProjectAlerts,
   TraceBaseline,
   TraceComparison,
   ProjectSettings,
@@ -20,6 +21,7 @@ import type {
   CloudProjectSummary,
   ForkDraft,
   ProjectInsightsSummary,
+  ProjectAlerts,
   TraceBaseline,
   TraceComparison,
   ProjectSettings,
@@ -65,6 +67,11 @@ export const getCloudProjects = async () =>
 export const getProjectUsageSummary = async () => {
   const projectId = await resolveActiveProjectId();
   return fetchJson<ProjectUsageSummary>(`/projects/${projectId}/usage`);
+};
+
+export const getProjectAlerts = async () => {
+  const projectId = await resolveActiveProjectId();
+  return fetchJson<ProjectAlerts>(`/projects/${projectId}/alerts`);
 };
 
 export const getProjectInsights = async () => {

@@ -35,8 +35,13 @@ import {
   addProjectMember,
   removeProjectMember,
   getAlertCandidatesForTrace,
+  getProjectAlertSettings,
+  updateProjectAlertSettings,
+  getProjectAlertDeliveryTargets,
+  recordProjectAlertDelivery,
   consumePendingInvites,
   isPrimaryWorkspace,
+  type ProjectAlertChannel,
 } from "./queries.js";
 
 const port = Number(process.env.PORT ?? 4000);
@@ -128,6 +133,121 @@ const createStripeBillingPortalSession = async ({
   return session.url;
 };
 
+const appBaseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.rifft.dev";
+
+const formatUsd = (value: number) => `$${value.toFixed(4)}`;
+
+const maskSlackTarget = (value: string) => {
+  try {
+    const url = new URL(value);
+    return `${url.host} ••••${value.slice(-4)}`;
+  } catch {
+    return `Slack webhook ••••${value.slice(-4)}`;
+  }
+};
+
+const formatFatalFailureSummary = (
+  fatalFailures: Array<{ mode: string; agent_id: string | null; explanation: string }>,
+) =>
+  fatalFailures
+    .slice(0, 3)
+    .map((failure) => {
+      const agentLabel = failure.agent_id ? ` (${failure.agent_id})` : "";
+      return `${failure.mode}${agentLabel}: ${failure.explanation}`;
+    })
+    .join("\n");
+
+const sendSlackAlert = async ({
+  webhookUrl,
+  title,
+  bodyLines,
+  actionUrl,
+}: {
+  webhookUrl: string;
+  title: string;
+  bodyLines: string[];
+  actionUrl: string;
+}) => {
+  const response = await fetch(webhookUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      text: `${title}\n${bodyLines.join("\n")}\n${actionUrl}`,
+      blocks: [
+        {
+          type: "header",
+          text: {
+            type: "plain_text",
+            text: title,
+          },
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: bodyLines.map((line) => `• ${line}`).join("\n"),
+          },
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: {
+                type: "plain_text",
+                text: "Open trace",
+              },
+              url: actionUrl,
+            },
+          ],
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`slack_webhook_rejected:${response.status}`);
+  }
+};
+
+const sendAlertEmail = async ({
+  to,
+  subject,
+  html,
+  text,
+}: {
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+}) => {
+  const resendApiKey = process.env.RESEND_API_KEY;
+  if (!resendApiKey) {
+    throw new Error("email_provider_not_configured");
+  }
+
+  const resendFromEmail = process.env.RESEND_FROM_EMAIL ?? "noreply@rifft.dev";
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${resendApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: resendFromEmail,
+      to,
+      subject,
+      html,
+      text,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    throw new Error(`email_send_failed:${response.status}:${errorBody}`);
+  }
+};
+
 type AppDeps = {
   getAuthenticatedUser: typeof getAuthenticatedUser;
   getAccessibleProject: typeof getAccessibleProject;
@@ -142,6 +262,10 @@ type AppDeps = {
   listProjectMembers: typeof listProjectMembers;
   addProjectMember: typeof addProjectMember;
   removeProjectMember: typeof removeProjectMember;
+  getProjectAlertSettings: typeof getProjectAlertSettings;
+  updateProjectAlertSettings: typeof updateProjectAlertSettings;
+  getProjectAlertDeliveryTargets: typeof getProjectAlertDeliveryTargets;
+  recordProjectAlertDelivery: typeof recordProjectAlertDelivery;
   pgQuery: (query: string, params?: unknown[]) => Promise<unknown>;
 };
 
@@ -163,6 +287,10 @@ export const createApp = (
     listProjectMembers,
     addProjectMember,
     removeProjectMember,
+    getProjectAlertSettings,
+    updateProjectAlertSettings,
+    getProjectAlertDeliveryTargets,
+    recordProjectAlertDelivery,
     pgQuery: pgPool.query.bind(pgPool),
     ...deps,
   };
@@ -370,6 +498,194 @@ export const createApp = (
     ...project,
     is_primary_workspace: await isPrimaryWorkspace(projectId),
   };
+  });
+
+  app.get("/projects/:id/alerts", async (request, reply) => {
+    const projectId = (request.params as { id: string }).id;
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
+    if (!user) {
+      reply.code(401);
+      return { error: "unauthorized" };
+    }
+
+    const accessibleProject = await resolvedDeps.getAccessibleProject(user.id, projectId);
+    if (!accessibleProject) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+
+    const alerts = await resolvedDeps.getProjectAlertSettings(projectId);
+    if (!alerts) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+
+    return alerts;
+  });
+
+  app.patch("/projects/:id/alerts", async (request, reply) => {
+    const projectId = (request.params as { id: string }).id;
+    const bodySchema = z.object({
+      fatal_failures_enabled: z.boolean().optional(),
+      slack_webhook_url: z.string().url().nullable().optional(),
+      alert_email: z.string().email().nullable().optional(),
+    });
+    const parsed = bodySchema.safeParse(request.body);
+
+    if (!parsed.success) {
+      reply.code(400);
+      return {
+        error: "invalid_request",
+        message: parsed.error.message,
+      };
+    }
+
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
+    if (!user) {
+      reply.code(401);
+      return { error: "unauthorized" };
+    }
+
+    const accessibleProject = await resolvedDeps.getAccessibleProject(user.id, projectId);
+    if (!accessibleProject) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+    if (!accessibleProject.permissions.can_update_settings) {
+      reply.code(403);
+      return { error: "forbidden" };
+    }
+
+    const currentAlerts = await resolvedDeps.getProjectAlertSettings(projectId);
+    if (!currentAlerts) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+    if (!currentAlerts.available) {
+      reply.code(403);
+      return { error: "alerting_requires_paid_plan" };
+    }
+
+    try {
+      const alerts = await resolvedDeps.updateProjectAlertSettings(projectId, parsed.data);
+      if (!alerts) {
+        reply.code(404);
+        return { error: "not_found" };
+      }
+
+      return alerts;
+    } catch (error) {
+      if (error instanceof Error && error.message === "alert_destination_required") {
+        reply.code(422);
+        return { error: "alert_destination_required" };
+      }
+      throw error;
+    }
+  });
+
+  app.post("/projects/:id/alerts/test", async (request, reply) => {
+    const projectId = (request.params as { id: string }).id;
+    const bodySchema = z.object({
+      channel: z.enum(["slack", "email"]),
+      slack_webhook_url: z.string().url().nullable().optional(),
+      alert_email: z.string().email().nullable().optional(),
+    });
+    const parsed = bodySchema.safeParse(request.body);
+
+    if (!parsed.success) {
+      reply.code(400);
+      return {
+        error: "invalid_request",
+        message: parsed.error.message,
+      };
+    }
+
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
+    if (!user) {
+      reply.code(401);
+      return { error: "unauthorized" };
+    }
+
+    const accessibleProject = await resolvedDeps.getAccessibleProject(user.id, projectId);
+    if (!accessibleProject) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+    if (!accessibleProject.permissions.can_update_settings) {
+      reply.code(403);
+      return { error: "forbidden" };
+    }
+
+    const currentAlerts = await resolvedDeps.getProjectAlertSettings(projectId);
+    if (!currentAlerts) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+    if (!currentAlerts.available) {
+      reply.code(403);
+      return { error: "alerting_requires_paid_plan" };
+    }
+
+    const target =
+      parsed.data.channel === "slack"
+        ? parsed.data.slack_webhook_url ?? (await resolvedDeps.getProjectAlertDeliveryTargets(projectId))?.slack_webhook_url ?? null
+        : parsed.data.alert_email ?? (await resolvedDeps.getProjectAlertDeliveryTargets(projectId))?.alert_email ?? null;
+
+    if (!target) {
+      reply.code(422);
+      return { error: "alert_destination_required" };
+    }
+
+    const project = await resolvedDeps.getProject(projectId);
+    if (!project) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+
+    try {
+      if (parsed.data.channel === "slack") {
+        await sendSlackAlert({
+          webhookUrl: target,
+          title: `Test alert from Rifft`,
+          bodyLines: [
+            `Workspace: ${project.name}`,
+            "This is a test fatal failure notification.",
+            "Real alerts will include the root cause summary and a direct trace link.",
+          ],
+          actionUrl: `${appBaseUrl}/settings`,
+        });
+      } else {
+        await sendAlertEmail({
+          to: target,
+          subject: `Rifft test alert: ${project.name}`,
+          html: `<p>This is a test alert from <strong>${project.name}</strong>.</p><p>Real fatal failure alerts include the root cause summary and a direct trace link.</p><p><a href="${appBaseUrl}/settings">Open Rifft settings</a></p>`,
+          text: `This is a test alert from ${project.name}.\n\nReal fatal failure alerts include the root cause summary and a direct trace link.\n\nOpen Rifft settings: ${appBaseUrl}/settings`,
+        });
+      }
+
+      await resolvedDeps.recordProjectAlertDelivery({
+        projectId,
+        channel: parsed.data.channel,
+        eventType: "test",
+        status: "sent",
+        targetLabel: parsed.data.channel === "slack" ? maskSlackTarget(target) : target,
+      });
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "alert_test_failed";
+      await resolvedDeps.recordProjectAlertDelivery({
+        projectId,
+        channel: parsed.data.channel,
+        eventType: "test",
+        status: "failed",
+        targetLabel: parsed.data.channel === "slack" ? maskSlackTarget(target) : target,
+        error: message,
+      });
+      reply.code(message === "email_provider_not_configured" ? 500 : 502);
+      return {
+        error: message === "email_provider_not_configured" ? "email_provider_not_configured" : "alert_test_failed",
+      };
+    }
   });
 
 app.post("/projects", async (request, reply) => {
@@ -885,7 +1201,7 @@ app.get("/traces/:traceId/agents/:agentId", async (request, reply) => {
           explanation: f.explanation,
         }),
       ),
-      trace_url: `${process.env.NEXT_PUBLIC_APP_URL ?? "https://app.rifft.dev"}/traces/${traceId}`,
+      trace_url: `${appBaseUrl}/traces/${traceId}`,
     };
 
     if (alertWebhookUrl) {
@@ -896,6 +1212,81 @@ app.get("/traces/:traceId/agents/:agentId", async (request, reply) => {
       }).catch((error) => {
         app.log.warn({ error, traceId }, "Alert webhook dispatch failed");
       });
+    }
+
+    const projectTargets = await getProjectAlertDeliveryTargets(candidates.project_id);
+    if (!projectTargets) {
+      return;
+    }
+
+    const summary = formatFatalFailureSummary(payload.fatal_failures);
+    const bodyLines = [
+      `Workspace: ${payload.project_name}`,
+      `Started: ${new Date(payload.started_at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}`,
+      `Cost: ${formatUsd(payload.total_cost_usd)}`,
+      `Root cause: ${summary || "Fatal failure detected"}`,
+    ];
+
+    if (projectTargets.slack_webhook_url) {
+      try {
+        await sendSlackAlert({
+          webhookUrl: projectTargets.slack_webhook_url,
+          title: `Fatal failure in ${payload.project_name}`,
+          bodyLines,
+          actionUrl: payload.trace_url,
+        });
+        await recordProjectAlertDelivery({
+          projectId: candidates.project_id,
+          channel: "slack",
+          eventType: "fatal_failure",
+          status: "sent",
+          traceId,
+          targetLabel: maskSlackTarget(projectTargets.slack_webhook_url),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "alert_send_failed";
+        await recordProjectAlertDelivery({
+          projectId: candidates.project_id,
+          channel: "slack",
+          eventType: "fatal_failure",
+          status: "failed",
+          traceId,
+          targetLabel: maskSlackTarget(projectTargets.slack_webhook_url),
+          error: message,
+        });
+        app.log.warn({ error, traceId }, "Slack fatal alert dispatch failed");
+      }
+    }
+
+    if (projectTargets.alert_email) {
+      try {
+        await sendAlertEmail({
+          to: projectTargets.alert_email,
+          subject: `Rifft fatal failure: ${payload.project_name}`,
+          html: `<p><strong>${payload.project_name}</strong> recorded a fatal failure.</p><p>${summary || "A fatal failure was detected."}</p><p>Started: ${payload.started_at}<br />Cost: ${formatUsd(payload.total_cost_usd)}</p><p><a href="${payload.trace_url}">Open trace in Rifft</a></p>`,
+          text: `${payload.project_name} recorded a fatal failure.\n\n${summary || "A fatal failure was detected."}\n\nStarted: ${payload.started_at}\nCost: ${formatUsd(payload.total_cost_usd)}\n\nOpen trace: ${payload.trace_url}`,
+        });
+        await recordProjectAlertDelivery({
+          projectId: candidates.project_id,
+          channel: "email",
+          eventType: "fatal_failure",
+          status: "sent",
+          traceId,
+          targetLabel: projectTargets.alert_email,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "alert_send_failed";
+        await recordProjectAlertDelivery({
+          projectId: candidates.project_id,
+          channel: "email",
+          eventType: "fatal_failure",
+          status: "failed",
+          traceId,
+          targetLabel: projectTargets.alert_email,
+          error: message,
+        });
+        app.log.warn({ error, traceId }, "Email fatal alert dispatch failed");
+      }
     }
   };
 

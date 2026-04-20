@@ -3,9 +3,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { getCloudProjects, getProjectSettings, getProjectUsageSummary } from "../lib/api";
+import {
+  getCloudProjects,
+  getProjectAlerts,
+  getProjectSettings,
+  getProjectUsageSummary,
+} from "../lib/api";
 import { requireCloudProject } from "../lib/require-cloud-project";
 import { ApiKeyCard } from "./api-key-card";
+import { AlertsCard } from "./alerts-card";
 import { InviteMemberCard } from "../invite-member-card";
 import { ManageBillingButton } from "./manage-billing-button";
 import { RefreshStatusButton } from "./refresh-status-button";
@@ -22,10 +28,11 @@ type SettingsPageProps = {
 export default async function SettingsPage({ searchParams }: SettingsPageProps) {
   const params = searchParams ? await searchParams : undefined;
   await requireCloudProject("/settings");
-  const [project, usageSummary, cloudProjects] = await Promise.all([
+  const [project, usageSummary, cloudProjects, alerts] = await Promise.all([
     getProjectSettings(),
     getProjectUsageSummary(),
     getCloudProjects(),
+    getProjectAlerts(),
   ]);
   const workspaces = [...cloudProjects.projects].sort((a, b) => {
     const left = new Date(a.created_at).getTime();
@@ -182,14 +189,20 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
         </CardContent>
       </Card>
 
+      <AlertsCard
+        projectId={project.id}
+        alerts={alerts}
+        canManage={project.permissions.can_update_settings}
+      />
+
       <Card className="rounded-3xl">
         <CardHeader>
           <CardTitle>Alert thresholds</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Set these to receive a webhook alert at <code>ALERT_WEBHOOK_URL</code> when a trace
-            exceeds either limit. Set to 0 to disable.
+            Set these to flag expensive or slow traces. Threshold webhooks still post to{" "}
+            <code>ALERT_WEBHOOK_URL</code>. Set either value to 0 to disable it.
           </p>
           <SettingsForm
             projectId={project.id}
