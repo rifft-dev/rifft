@@ -150,7 +150,7 @@ type TraceBaselineRecord = {
 
 export type ProjectAlertChannel = "slack" | "email";
 
-export type ProjectAlertEventType = "fatal_failure" | "test";
+export type ProjectAlertEventType = "fatal_failure" | "test" | "regression_digest";
 
 export type ProjectAlertDeliveryStatus = "sent" | "failed";
 
@@ -176,8 +176,10 @@ type ProjectAlertChannelSettings = {
 
 export type ProjectAlertSettings = {
   available: boolean;
+  regression_available: boolean;
   plan_key: "free" | "pro" | "scale";
   fatal_failures_enabled: boolean;
+  regression_digest_enabled: boolean;
   slack: ProjectAlertChannelSettings;
   email: ProjectAlertChannelSettings;
   recent_deliveries: ProjectAlertDeliveryRecord[];
@@ -529,6 +531,10 @@ const ensureProjectAlerts = async () => {
   await pgPool.query(`
     ALTER TABLE projects
     ADD COLUMN IF NOT EXISTS fatal_failure_alerts_enabled BOOLEAN NOT NULL DEFAULT FALSE
+  `);
+  await pgPool.query(`
+    ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS regression_digest_enabled BOOLEAN NOT NULL DEFAULT FALSE
   `);
   await pgPool.query(`
     ALTER TABLE projects
@@ -1763,11 +1769,12 @@ export const getProjectAlertSettings = async (projectId: string): Promise<Projec
   const [projectResult, deliveriesResult, planKey] = await Promise.all([
     pgPool.query<{
       fatal_failure_alerts_enabled: boolean;
+      regression_digest_enabled: boolean;
       slack_webhook_url: string | null;
       alert_email: string | null;
     }>(
       `
-        SELECT fatal_failure_alerts_enabled, slack_webhook_url, alert_email
+        SELECT fatal_failure_alerts_enabled, regression_digest_enabled, slack_webhook_url, alert_email
         FROM projects
         WHERE id = $1
         LIMIT 1
@@ -1805,7 +1812,12 @@ export const getProjectAlertSettings = async (projectId: string): Promise<Projec
     id: delivery.id,
     project_id: projectId,
     channel: delivery.channel === "email" ? "email" : "slack",
-    event_type: delivery.event_type === "test" ? "test" : "fatal_failure",
+    event_type:
+      delivery.event_type === "test"
+        ? "test"
+        : delivery.event_type === "regression_digest"
+          ? "regression_digest"
+          : "fatal_failure",
     status: delivery.status === "failed" ? "failed" : "sent",
     trace_id: delivery.trace_id,
     target: delivery.target_label,
@@ -1817,8 +1829,10 @@ export const getProjectAlertSettings = async (projectId: string): Promise<Projec
 
   return {
     available: planKey === "pro" || planKey === "scale",
+    regression_available: planKey === "scale",
     plan_key: planKey,
     fatal_failures_enabled: Boolean(row.fatal_failure_alerts_enabled),
+    regression_digest_enabled: Boolean(row.regression_digest_enabled),
     slack: toProjectAlertChannelSettings({
       configured: Boolean(row.slack_webhook_url),
       target: maskSlackWebhookTarget(row.slack_webhook_url),
@@ -1837,6 +1851,7 @@ export const updateProjectAlertSettings = async (
   projectId: string,
   updates: {
     fatal_failures_enabled?: boolean;
+    regression_digest_enabled?: boolean;
     slack_webhook_url?: string | null;
     alert_email?: string | null;
   },
@@ -1861,7 +1876,15 @@ export const updateProjectAlertSettings = async (
       ? updates.fatal_failures_enabled
       : current.fatal_failures_enabled;
 
+  const nextRegressionEnabled =
+    updates.regression_digest_enabled !== undefined
+      ? updates.regression_digest_enabled
+      : current.regression_digest_enabled;
+
   if (nextFatalEnabled && !nextSlackConfigured && !nextEmailConfigured) {
+    throw new Error("alert_destination_required");
+  }
+  if (nextRegressionEnabled && !nextSlackConfigured && !nextEmailConfigured) {
     throw new Error("alert_destination_required");
   }
 
@@ -1872,6 +1895,12 @@ export const updateProjectAlertSettings = async (
   if (updates.fatal_failures_enabled !== undefined) {
     assignments.push(`fatal_failure_alerts_enabled = $${paramIndex}`);
     params.push(updates.fatal_failures_enabled);
+    paramIndex += 1;
+  }
+
+  if (updates.regression_digest_enabled !== undefined) {
+    assignments.push(`regression_digest_enabled = $${paramIndex}`);
+    params.push(updates.regression_digest_enabled);
     paramIndex += 1;
   }
 
@@ -3182,6 +3211,159 @@ export const getAlertCandidatesForTrace = async (traceId: string) => {
     started_at: trace.started_at,
     total_cost_usd: trace.total_cost_usd,
   };
+};
+
+// ─── Regression detection ─────────────────────────────────────────────────────
+
+export type RegressionCandidate = {
+  mode: string;
+  severity: "fatal" | "benign";
+  recent_affected_count: number;
+  recent_rate: number;
+  historical_rate: number;
+  rate_delta: number;
+  sample_trace_id: string | null;
+  sample_explanation: string;
+  dominant_agent_id: string | null;
+  recent_window_size: number;
+  historical_window_size: number;
+};
+
+export const detectRegressions = async (projectId: string): Promise<RegressionCandidate[]> => {
+  const now = new Date();
+  const cutoffRecent = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const cutoffHistorical = new Date(now.getTime() - 28 * 24 * 60 * 60 * 1000);
+
+  const result = await pgPool.query<{
+    trace_id: string;
+    started_at: Date | string;
+    mast_failures: unknown;
+  }>(
+    `
+      SELECT trace_id, started_at, mast_failures
+      FROM traces
+      WHERE project_id = $1
+        AND started_at >= $2
+      ORDER BY started_at DESC
+    `,
+    [projectId, cutoffHistorical.toISOString()],
+  );
+
+  const allTraces = result.rows.map((row) => ({
+    trace_id: String(row.trace_id),
+    started_at: row.started_at instanceof Date ? row.started_at : new Date(row.started_at),
+    mast_failures: (
+      Array.isArray(row.mast_failures)
+        ? row.mast_failures
+        : parseJson<MastFailure[]>(JSON.stringify(row.mast_failures ?? []), [])
+    ).map((f: MastFailure) => ({
+      mode: String(f.mode),
+      severity: f.severity === "fatal" ? "fatal" : ("benign" as const),
+      agent_id: f.agent_id ? String(f.agent_id) : null,
+      explanation: String(f.explanation),
+    })),
+  }));
+
+  const recentTraces = allTraces.filter((t) => t.started_at >= cutoffRecent);
+  const historicalTraces = allTraces.filter((t) => t.started_at < cutoffRecent);
+
+  if (recentTraces.length === 0) {
+    return [];
+  }
+
+  type ModeEntry = {
+    mode: string;
+    severity: "fatal" | "benign";
+    recent_affected: Set<string>;
+    historical_affected: Set<string>;
+    agent_counts: Map<string, number>;
+    sample_explanation: string;
+    sample_trace_id: string | null;
+  };
+
+  const modeMap = new Map<string, ModeEntry>();
+
+  const processTraces = (traces: typeof allTraces, window: "recent" | "historical") => {
+    for (const trace of traces) {
+      const seenModes = new Set<string>();
+      for (const failure of trace.mast_failures) {
+        const entry: ModeEntry = modeMap.get(failure.mode) ?? {
+          mode: failure.mode,
+          severity: "benign",
+          recent_affected: new Set(),
+          historical_affected: new Set(),
+          agent_counts: new Map(),
+          sample_explanation: failure.explanation,
+          sample_trace_id: null,
+        };
+
+        if (failure.severity === "fatal") {
+          entry.severity = "fatal";
+        }
+        if (!seenModes.has(failure.mode)) {
+          if (window === "recent") {
+            entry.recent_affected.add(trace.trace_id);
+            if (!entry.sample_trace_id) {
+              entry.sample_trace_id = trace.trace_id;
+            }
+          } else {
+            entry.historical_affected.add(trace.trace_id);
+          }
+          seenModes.add(failure.mode);
+        }
+        if (failure.agent_id) {
+          entry.agent_counts.set(failure.agent_id, (entry.agent_counts.get(failure.agent_id) ?? 0) + 1);
+        }
+        if (!entry.sample_explanation) {
+          entry.sample_explanation = failure.explanation;
+        }
+
+        modeMap.set(failure.mode, entry);
+      }
+    }
+  };
+
+  processTraces(historicalTraces, "historical");
+  processTraces(recentTraces, "recent");
+
+  const candidates: RegressionCandidate[] = [];
+
+  for (const entry of modeMap.values()) {
+    if (entry.recent_affected.size === 0) {
+      continue;
+    }
+
+    const recentRate = entry.recent_affected.size / recentTraces.length;
+    const historicalRate =
+      historicalTraces.length > 0 ? entry.historical_affected.size / historicalTraces.length : 0;
+    const delta = recentRate - historicalRate;
+
+    // Surface the mode if it's newly appearing or has risen by ≥10pp
+    if (historicalRate === 0 || delta >= 0.1) {
+      const dominantAgent = [...entry.agent_counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+
+      candidates.push({
+        mode: entry.mode,
+        severity: entry.severity,
+        recent_affected_count: entry.recent_affected.size,
+        recent_rate: recentRate,
+        historical_rate: historicalRate,
+        rate_delta: delta,
+        sample_trace_id: entry.sample_trace_id,
+        sample_explanation: entry.sample_explanation,
+        dominant_agent_id: dominantAgent,
+        recent_window_size: recentTraces.length,
+        historical_window_size: historicalTraces.length,
+      });
+    }
+  }
+
+  // Sort: newly appearing first (historical_rate === 0), then by largest delta
+  return candidates.sort((a, b) => {
+    if (a.historical_rate === 0 && b.historical_rate > 0) return -1;
+    if (b.historical_rate === 0 && a.historical_rate > 0) return 1;
+    return b.rate_delta - a.rate_delta;
+  });
 };
 
 // ─── Incident shares ──────────────────────────────────────────────────────────

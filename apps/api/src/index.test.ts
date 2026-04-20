@@ -423,6 +423,8 @@ test("GET /projects/:id/alerts returns alert settings for accessible workspaces"
         last_alert_at: null,
         last_error: null,
       },
+      regression_available: false,
+      regression_digest_enabled: false,
       recent_deliveries: [],
     }),
     getProjectAlertDeliveryTargets: async () => ({
@@ -475,6 +477,8 @@ test("PATCH /projects/:id/alerts requires a paid plan", async () => {
         last_alert_at: null,
         last_error: null,
       },
+      regression_available: false,
+      regression_digest_enabled: false,
       recent_deliveries: [],
     }),
     getProjectAlertDeliveryTargets: async () => ({
@@ -530,6 +534,8 @@ test("PATCH /projects/:id/alerts maps missing destinations to 422", async () => 
         last_alert_at: null,
         last_error: null,
       },
+      regression_available: false,
+      regression_digest_enabled: false,
       recent_deliveries: [],
     }),
     updateProjectAlertSettings: async () => {
@@ -583,6 +589,8 @@ test("POST /projects/:id/alerts/test returns 422 when the requested channel has 
         last_alert_at: null,
         last_error: null,
       },
+      regression_available: false,
+      regression_digest_enabled: false,
       recent_deliveries: [],
     }),
     getProjectAlertDeliveryTargets: async () => ({
@@ -1122,7 +1130,9 @@ const makeAlertDeps = (overrides?: Record<string, unknown>) => ({
     fatal_failures_enabled: true,
     slack: { configured: true, target: "hooks.slack.com ••••abcd", last_tested_at: null, last_alert_at: null, last_error: null },
     email: { configured: true, target: "owner@example.com", last_tested_at: null, last_alert_at: null, last_error: null },
-    recent_deliveries: [],
+    regression_available: false,
+      regression_digest_enabled: false,
+      recent_deliveries: [],
   }),
   getProjectAlertDeliveryTargets: async () => ({
     slack_webhook_url: "https://hooks.slack.com/services/T00/B00/abcd",
@@ -1424,6 +1434,207 @@ test("GET /incident/:token returns trace and comparison for a valid token", asyn
     assert.equal(response.statusCode, 404);
     assert.deepEqual(response.json(), { error: "not_found" });
   } finally {
+    await app.close();
+  }
+});
+
+// ─── Regression digest tests ─────────────────────────────────────────────────
+
+const makeRegressionDeps = (overrides?: Record<string, unknown>) => ({
+  getAuthenticatedUser: async () => ({
+    id: "owner-1",
+    email: "owner@example.com",
+    name: null,
+  }),
+  getAccessibleProject: async () =>
+    makeAccessibleProject({ project_role: "owner", can_update_settings: true }),
+  getProjectAlertSettings: async () => ({
+    available: true,
+    plan_key: "scale" as const,
+    fatal_failures_enabled: true,
+    regression_available: true,
+    regression_digest_enabled: true,
+    slack: { configured: true, target: "hooks.slack.com ••••abcd", last_tested_at: null, last_alert_at: null, last_error: null },
+    email: { configured: true, target: "owner@example.com", last_tested_at: null, last_alert_at: null, last_error: null },
+    recent_deliveries: [],
+  }),
+  updateProjectAlertSettings: async () => ({
+    available: true,
+    plan_key: "scale" as const,
+    fatal_failures_enabled: true,
+    regression_available: true,
+    regression_digest_enabled: true,
+    slack: { configured: true, target: "hooks.slack.com ••••abcd", last_tested_at: null, last_alert_at: null, last_error: null },
+    email: { configured: true, target: "owner@example.com", last_tested_at: null, last_alert_at: null, last_error: null },
+    recent_deliveries: [],
+  }),
+  pgQuery: async () => ({
+    rows: [{ slack_webhook_url: "https://hooks.slack.com/services/T00/B00/abcd", alert_email: "owner@example.com", name: "My Workspace" }],
+    rowCount: 1,
+  }),
+  detectRegressions: async () => [
+    {
+      mode: "context_window_overflow",
+      severity: "fatal" as const,
+      recent_affected_count: 4,
+      recent_rate: 0.4,
+      historical_rate: 0.08,
+      rate_delta: 0.32,
+      sample_trace_id: "trace-1",
+      sample_explanation: "Agent hit the context limit repeatedly.",
+      dominant_agent_id: "researcher",
+      recent_window_size: 10,
+      historical_window_size: 30,
+    },
+  ],
+  recordProjectAlertDelivery: async () => {},
+  ...overrides,
+});
+
+test("PATCH /projects/:id/alerts returns 403 when enabling regression digest on a Pro plan", async () => {
+  const app = createApp({
+    getAuthenticatedUser: async () => ({ id: "owner-1", email: "owner@example.com", name: null }),
+    getAccessibleProject: async () => makeAccessibleProject({ project_role: "owner", can_update_settings: true }),
+    getProjectAlertSettings: async () => ({
+      available: true,
+      plan_key: "pro" as const,
+      fatal_failures_enabled: true,
+      regression_available: false,
+      regression_digest_enabled: false,
+      slack: { configured: false, target: null, last_tested_at: null, last_alert_at: null, last_error: null },
+      email: { configured: false, target: null, last_tested_at: null, last_alert_at: null, last_error: null },
+      recent_deliveries: [],
+    }),
+  });
+
+  try {
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/projects/project-1/alerts",
+      payload: { regression_digest_enabled: true },
+    });
+
+    assert.equal(response.statusCode, 403);
+    assert.deepEqual(response.json(), { error: "regression_digest_requires_scale_plan" });
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /internal/projects/:id/regression-digest returns 401 with wrong secret", async () => {
+  const previousSecret = process.env.INTERNAL_API_SECRET;
+  process.env.INTERNAL_API_SECRET = "correct-secret";
+
+  const app = createApp(makeRegressionDeps());
+
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/projects/project-1/regression-digest",
+      headers: { "x-internal-secret": "wrong-secret" },
+    });
+
+    assert.equal(response.statusCode, 401);
+    assert.deepEqual(response.json(), { error: "unauthorized" });
+  } finally {
+    if (previousSecret === undefined) {
+      delete process.env.INTERNAL_API_SECRET;
+    } else {
+      process.env.INTERNAL_API_SECRET = previousSecret;
+    }
+    await app.close();
+  }
+});
+
+test("POST /internal/projects/:id/regression-digest skips when regression digest is not enabled", async () => {
+  const app = createApp(
+    makeRegressionDeps({
+      getProjectAlertSettings: async () => ({
+        available: true,
+        plan_key: "scale" as const,
+        fatal_failures_enabled: true,
+        regression_available: true,
+        regression_digest_enabled: false,
+        slack: { configured: true, target: "hooks.slack.com ••••abcd", last_tested_at: null, last_alert_at: null, last_error: null },
+        email: { configured: false, target: null, last_tested_at: null, last_alert_at: null, last_error: null },
+        recent_deliveries: [],
+      }),
+    }),
+  );
+
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/projects/project-1/regression-digest",
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { skipped: true, reason: "not_enabled" });
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /internal/projects/:id/regression-digest skips when no regressions are detected", async () => {
+  const app = createApp(
+    makeRegressionDeps({
+      detectRegressions: async () => [],
+    }),
+  );
+
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/projects/project-1/regression-digest",
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { skipped: true, reason: "no_regressions" });
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /internal/projects/:id/regression-digest sends Slack digest and records delivery", async () => {
+  const fetchCalls: { url: string; body: unknown }[] = [];
+  mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+    fetchCalls.push({ url, body: JSON.parse(init?.body as string ?? "null") });
+    return new Response("ok", { status: 200 });
+  });
+
+  const deliveries: { channel: string; eventType: string; status: string }[] = [];
+  const app = createApp(
+    makeRegressionDeps({
+      pgQuery: async () => ({
+        rows: [{ slack_webhook_url: "https://hooks.slack.com/services/T00/B00/abcd", alert_email: null, name: "My Workspace" }],
+        rowCount: 1,
+      }),
+      recordProjectAlertDelivery: async (d: { channel: string; eventType: string; status: string }) => {
+        deliveries.push(d);
+      },
+    }),
+  );
+
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/projects/project-1/regression-digest",
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json() as { skipped: boolean; regressions: number; results: { slack?: string } };
+    assert.equal(body.skipped, false);
+    assert.equal(body.regressions, 1);
+    assert.equal(body.results.slack, "sent");
+    assert.equal(fetchCalls.length, 1);
+    assert.equal(fetchCalls[0].url, "https://hooks.slack.com/services/T00/B00/abcd");
+    assert.ok(JSON.stringify(fetchCalls[0].body).includes("context window overflow"));
+    assert.equal(deliveries.length, 1);
+    assert.equal(deliveries[0].channel, "slack");
+    assert.equal(deliveries[0].eventType, "regression_digest");
+    assert.equal(deliveries[0].status, "sent");
+  } finally {
+    mock.restoreAll();
     await app.close();
   }
 });

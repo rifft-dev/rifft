@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, Mail, MessageSquareWarning } from "lucide-react";
+import { Bell, Mail, MessageSquareWarning, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -53,8 +53,10 @@ const getSaveErrorMessage = (error?: string) => {
       return "Only workspace owners can change alert settings.";
     case "alerting_requires_paid_plan":
       return "Slack and email alerts are available on Cloud Pro and Scale.";
+    case "regression_digest_requires_scale_plan":
+      return "Automatic regression detection is available on Cloud Scale.";
     case "alert_destination_required":
-      return "Add at least one Slack webhook or alert email before enabling fatal failure alerts.";
+      return "Add at least one Slack webhook or alert email before enabling alerts.";
     default:
       return "Could not save alert settings.";
   }
@@ -91,6 +93,7 @@ export function AlertsCard({
   const [isSaving, setIsSaving] = useState(false);
   const [testingChannel, setTestingChannel] = useState<"slack" | "email" | null>(null);
   const [fatalFailuresEnabled, setFatalFailuresEnabled] = useState(alerts.fatal_failures_enabled);
+  const [regressionDigestEnabled, setRegressionDigestEnabled] = useState(alerts.regression_digest_enabled);
   const [slackWebhookUrl, setSlackWebhookUrl] = useState("");
   const [email, setEmail] = useState(alerts.email.target ?? "");
   const [clearSlack, setClearSlack] = useState(false);
@@ -127,6 +130,7 @@ export function AlertsCard({
         },
         body: JSON.stringify({
           fatal_failures_enabled: fatalFailuresEnabled,
+          regression_digest_enabled: regressionDigestEnabled,
           slack_webhook_url: clearSlack ? null : slackWebhookUrl.trim() || undefined,
           alert_email: clearEmail ? null : email.trim() || null,
         }),
@@ -339,6 +343,34 @@ export function AlertsCard({
                 Send immediately when a trace includes a fatal failure, with the root cause summary
                 and a direct trace link.
               </p>
+            </div>
+          </label>
+          <label className="flex items-start gap-3 rounded-xl border bg-muted/20 px-3 py-3">
+            <input
+              type="checkbox"
+              className="mt-1 h-4 w-4"
+              checked={regressionDigestEnabled}
+              disabled={!alerts.regression_available || !canManage}
+              onChange={(event) => setRegressionDigestEnabled(event.target.checked)}
+            />
+            <div className="flex-1 space-y-1">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="h-3.5 w-3.5" />
+                <div className="text-sm font-medium">Weekly regression digest</div>
+                <Badge variant={alerts.regression_available ? "default" : "outline"}>
+                  Scale
+                </Badge>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Receive a weekly summary when a failure mode starts appearing significantly more
+                often than in the prior three weeks — before it becomes a pattern you have to hunt
+                down manually.
+              </p>
+              {!alerts.regression_available ? (
+                <p className="text-xs text-muted-foreground/70">
+                  Upgrade to Cloud Scale to enable automatic regression detection.
+                </p>
+              ) : null}
             </div>
           </label>
         </div>

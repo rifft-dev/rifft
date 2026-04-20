@@ -46,6 +46,7 @@ import {
   isPrimaryWorkspace,
   createIncidentShare,
   getIncidentShareByToken,
+  detectRegressions,
 } from "./queries.js";
 
 const port = Number(process.env.PORT ?? 4000);
@@ -499,6 +500,7 @@ type AppDeps = {
   createIncidentShare: typeof createIncidentShare;
   getIncidentShareByToken: typeof getIncidentShareByToken;
   getTraceProjectId: typeof getTraceProjectId;
+  detectRegressions: typeof detectRegressions;
   pgQuery: (query: string, params?: unknown[]) => Promise<unknown>;
 };
 
@@ -531,6 +533,7 @@ export const createApp = (
     createIncidentShare,
     getIncidentShareByToken,
     getTraceProjectId,
+    detectRegressions,
     pgQuery: pgPool.query.bind(pgPool),
     ...deps,
   };
@@ -767,6 +770,7 @@ export const createApp = (
     const projectId = (request.params as { id: string }).id;
     const bodySchema = z.object({
       fatal_failures_enabled: z.boolean().optional(),
+      regression_digest_enabled: z.boolean().optional(),
       slack_webhook_url: z.string().url().nullable().optional(),
       alert_email: z.string().email().nullable().optional(),
     });
@@ -804,6 +808,10 @@ export const createApp = (
     if (!currentAlerts.available) {
       reply.code(403);
       return { error: "alerting_requires_paid_plan" };
+    }
+    if (parsed.data.regression_digest_enabled && !currentAlerts.regression_available) {
+      reply.code(403);
+      return { error: "regression_digest_requires_scale_plan" };
     }
 
     try {
@@ -1712,6 +1720,163 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
     }
   };
 
+  const dispatchRegressionDigest = async (projectId: string) => {
+    const alertSettings = await resolvedDeps.getProjectAlertSettings(projectId);
+    if (!alertSettings?.regression_available || !alertSettings.regression_digest_enabled) {
+      return { skipped: true, reason: "not_enabled" };
+    }
+
+    const targets = (await resolvedDeps.pgQuery(
+      `SELECT slack_webhook_url, alert_email, name FROM projects WHERE id = $1 LIMIT 1`,
+      [projectId],
+    )) as { rows: Array<{ slack_webhook_url: string | null; alert_email: string | null; name: string }>; rowCount: number | null };
+    if (!targets.rowCount || !targets.rows[0]) {
+      return { skipped: true, reason: "project_not_found" };
+    }
+    const { slack_webhook_url, alert_email, name: projectName } = targets.rows[0];
+
+    if (!slack_webhook_url && !alert_email) {
+      return { skipped: true, reason: "no_destination" };
+    }
+
+    const regressions = await resolvedDeps.detectRegressions(projectId);
+    if (regressions.length === 0) {
+      return { skipped: true, reason: "no_regressions" };
+    }
+
+    const formatRate = (rate: number) => `${Math.round(rate * 100)}%`;
+    const formatMode = (mode: string) => mode.replaceAll("_", " ");
+
+    const topRegressions = regressions.slice(0, 5);
+
+    const slackBodyLines = topRegressions.map((r) => {
+      const rateStr = `${formatRate(r.recent_rate)} of traces this week`;
+      const deltaStr =
+        r.historical_rate === 0
+          ? `new this week, ${r.recent_affected_count} trace${r.recent_affected_count === 1 ? "" : "s"}`
+          : `up from ${formatRate(r.historical_rate)} (+${Math.round(r.rate_delta * 100)}pp)`;
+      const agentStr = r.dominant_agent_id ? ` — ${r.dominant_agent_id}` : "";
+      return `${formatMode(r.mode)}: ${rateStr} (${deltaStr})${agentStr}`;
+    });
+
+    const emailRows = topRegressions
+      .map((r) => {
+        const deltaStr =
+          r.historical_rate === 0
+            ? "New this week"
+            : `+${Math.round(r.rate_delta * 100)}pp vs prior 3 weeks`;
+        const agentStr = r.dominant_agent_id ? `<br/><span style="font-size:12px;color:#888">${r.dominant_agent_id}</span>` : "";
+        return `<tr>
+          <td style="padding:8px 12px;border-bottom:1px solid #eee">${r.severity === "fatal" ? "⚠️" : "•"} ${formatMode(r.mode)}${agentStr}</td>
+          <td style="padding:8px 12px;border-bottom:1px solid #eee">${formatRate(r.recent_rate)}</td>
+          <td style="padding:8px 12px;border-bottom:1px solid #eee">${formatRate(r.historical_rate)}</td>
+          <td style="padding:8px 12px;border-bottom:1px solid #eee">${deltaStr}</td>
+        </tr>`;
+      })
+      .join("");
+
+    const emailHtml = `
+      <h2 style="font-family:sans-serif;font-size:18px;margin-bottom:8px">Weekly regression digest: ${projectName}</h2>
+      <p style="font-family:sans-serif;font-size:14px;color:#555;margin-bottom:16px">
+        Rifft detected ${regressions.length} failure mode${regressions.length === 1 ? "" : "s"} trending upward over the last 7 days
+        (compared to the previous 3 weeks, across ${topRegressions[0]?.recent_window_size ?? 0} recent traces).
+      </p>
+      <table style="border-collapse:collapse;width:100%;font-family:sans-serif;font-size:14px">
+        <thead>
+          <tr style="background:#f5f5f5">
+            <th style="padding:8px 12px;text-align:left">Failure mode</th>
+            <th style="padding:8px 12px;text-align:left">This week</th>
+            <th style="padding:8px 12px;text-align:left">Prior baseline</th>
+            <th style="padding:8px 12px;text-align:left">Change</th>
+          </tr>
+        </thead>
+        <tbody>${emailRows}</tbody>
+      </table>
+      <p style="margin-top:20px;font-family:sans-serif;font-size:14px">
+        <a href="${appBaseUrl}/traces">Open workspace in Rifft →</a>
+      </p>
+    `;
+
+    const emailText = [
+      `Weekly regression digest: ${projectName}`,
+      `${regressions.length} failure mode(s) trending up over the last 7 days:`,
+      "",
+      ...topRegressions.map((r) => {
+        const deltaStr =
+          r.historical_rate === 0
+            ? `new this week`
+            : `up from ${formatRate(r.historical_rate)} (+${Math.round(r.rate_delta * 100)}pp)`;
+        return `- ${formatMode(r.mode)}: ${formatRate(r.recent_rate)} of traces (${deltaStr})`;
+      }),
+      "",
+      `Open workspace: ${appBaseUrl}/traces`,
+    ].join("\n");
+
+    const results: { slack?: string; email?: string } = {};
+
+    if (slack_webhook_url) {
+      try {
+        await sendSlackAlert({
+          webhookUrl: slack_webhook_url,
+          title: `Weekly regression digest: ${projectName}`,
+          bodyLines: slackBodyLines,
+          actionUrl: `${appBaseUrl}/traces`,
+        });
+        await resolvedDeps.recordProjectAlertDelivery({
+          projectId,
+          channel: "slack",
+          eventType: "regression_digest",
+          status: "sent",
+          targetLabel: maskSlackTarget(slack_webhook_url),
+        });
+        results.slack = "sent";
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "alert_send_failed";
+        await resolvedDeps.recordProjectAlertDelivery({
+          projectId,
+          channel: "slack",
+          eventType: "regression_digest",
+          status: "failed",
+          targetLabel: maskSlackTarget(slack_webhook_url),
+          error: message,
+        });
+        results.slack = "failed";
+      }
+    }
+
+    if (alert_email) {
+      try {
+        await sendAlertEmail({
+          to: alert_email,
+          subject: `Rifft weekly digest: ${regressions.length} regression${regressions.length === 1 ? "" : "s"} in ${projectName}`,
+          html: emailHtml,
+          text: emailText,
+        });
+        await resolvedDeps.recordProjectAlertDelivery({
+          projectId,
+          channel: "email",
+          eventType: "regression_digest",
+          status: "sent",
+          targetLabel: alert_email,
+        });
+        results.email = "sent";
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "alert_send_failed";
+        await resolvedDeps.recordProjectAlertDelivery({
+          projectId,
+          channel: "email",
+          eventType: "regression_digest",
+          status: "failed",
+          targetLabel: alert_email,
+          error: message,
+        });
+        results.email = "failed";
+      }
+    }
+
+    return { skipped: false, regressions: regressions.length, results };
+  };
+
   const dispatchThresholdAlert = async (traceId: string) => {
     const alertWebhookUrl = process.env.ALERT_WEBHOOK_URL;
     if (!alertWebhookUrl) {
@@ -1784,6 +1949,21 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
     const traceId = (request.params as { traceId: string }).traceId;
     await Promise.all([dispatchFatalFailureAlert(traceId), dispatchThresholdAlert(traceId)]);
     return { ok: true };
+  });
+
+  app.post("/internal/projects/:id/regression-digest", async (request, reply) => {
+    const internalSecret = process.env.INTERNAL_API_SECRET;
+    if (internalSecret) {
+      const provided = request.headers["x-internal-secret"];
+      if (provided !== internalSecret) {
+        reply.code(401);
+        return { error: "unauthorized" };
+      }
+    }
+
+    const projectId = (request.params as { id: string }).id;
+    const result = await dispatchRegressionDigest(projectId);
+    return result;
   });
 
   app.get("/projects/:id/members", async (request, reply) => {
