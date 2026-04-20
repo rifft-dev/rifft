@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowLeft, GitBranch, TrendingDown, TrendingUp } from "l
 import {
   getAgentDetail,
   getProjectSettings,
+  getProjectUsageSummary,
   getForkDrafts,
   getProjectBaseline,
   getTraceComparison,
@@ -65,9 +66,10 @@ export default async function TraceDetailPage({
       getForkDrafts(traceId),
       getProjectBaseline(),
       getProjectSettings(),
+      getProjectUsageSummary(),
     ]);
     const { trace, graph, timeline } = snapshot;
-    const [comparisonResult, forkDraftsResult, baselineResult, projectSettingsResult] = ancillaryResults;
+    const [comparisonResult, forkDraftsResult, baselineResult, projectSettingsResult, usageSummaryResult] = ancillaryResults;
     const comparisonResponse =
       comparisonResult.status === "fulfilled" ? comparisonResult.value : { comparison: null };
     const forkDrafts =
@@ -78,10 +80,14 @@ export default async function TraceDetailPage({
       projectSettingsResult.status === "fulfilled"
         ? projectSettingsResult.value
         : {
+            id: "",
             permissions: {
               can_update_settings: false,
             },
           };
+    const planKey =
+      usageSummaryResult.status === "fulfilled" ? usageSummaryResult.value.plan.key : "free";
+    const publicLinkAvailable = planKey === "pro" || planKey === "scale";
     const partialFailures = ancillaryResults.filter((result) => result.status === "rejected").length;
     const agentDetails = await Promise.all(
       graph.nodes.map(async (node) => {
@@ -146,7 +152,13 @@ export default async function TraceDetailPage({
   traceId={trace.trace_id}
   isCurrentBaseline={isCurrentBaseline}
   canUpdate={projectSettings.permissions.can_update_settings}
-/>                <ShareIncidentReport traceId={trace.trace_id} report={incidentReport} />
+/>                {publicLinkAvailable ? (
+                  <ShareIncidentReport
+                    traceId={trace.trace_id}
+                    projectId={projectSettings.id ?? trace.project_id}
+                    report={incidentReport}
+                  />
+                ) : null}
               </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">

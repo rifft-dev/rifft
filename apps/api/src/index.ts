@@ -44,6 +44,8 @@ import {
   getProjectPlanKey,
   consumePendingInvites,
   isPrimaryWorkspace,
+  createIncidentShare,
+  getIncidentShareByToken,
 } from "./queries.js";
 
 const port = Number(process.env.PORT ?? 4000);
@@ -494,6 +496,9 @@ type AppDeps = {
   upsertTraceFailureExplanation: typeof upsertTraceFailureExplanation;
   getProjectPlanKey: typeof getProjectPlanKey;
   generateFailureExplanation: typeof generateFailureExplanationWithAnthropic;
+  createIncidentShare: typeof createIncidentShare;
+  getIncidentShareByToken: typeof getIncidentShareByToken;
+  getTraceProjectId: typeof getTraceProjectId;
   pgQuery: (query: string, params?: unknown[]) => Promise<unknown>;
 };
 
@@ -523,6 +528,9 @@ export const createApp = (
     upsertTraceFailureExplanation,
     getProjectPlanKey,
     generateFailureExplanation: generateFailureExplanationWithAnthropic,
+    createIncidentShare,
+    getIncidentShareByToken,
+    getTraceProjectId,
     pgQuery: pgPool.query.bind(pgPool),
     ...deps,
   };
@@ -918,6 +926,69 @@ export const createApp = (
         error: message === "email_provider_not_configured" ? "email_provider_not_configured" : "alert_test_failed",
       };
     }
+  });
+
+  // ─── Incident sharing ───────────────────────────────────────────────────────
+
+  app.post("/projects/:id/traces/:traceId/share", async (request, reply) => {
+    const { id: projectId, traceId } = request.params as { id: string; traceId: string };
+
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
+    if (!user) {
+      reply.code(401);
+      return { error: "unauthorized" };
+    }
+
+    const accessibleProject = await resolvedDeps.getAccessibleProject(user.id, projectId);
+    if (!accessibleProject) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+
+    const planKey = await resolvedDeps.getProjectPlanKey(projectId);
+    if (planKey === "free") {
+      reply.code(403);
+      return { error: "incident_sharing_requires_paid_plan" };
+    }
+
+    const traceProjectId = await resolvedDeps.getTraceProjectId(traceId);
+    if (traceProjectId !== projectId) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+
+    const token = await resolvedDeps.createIncidentShare(traceId, projectId, user.id);
+    return { token, url: `${appBaseUrl}/incident/${token}` };
+  });
+
+  app.get("/incident/:token", async (request, reply) => {
+    const { token } = request.params as { token: string };
+
+    const share = await resolvedDeps.getIncidentShareByToken(token);
+    if (!share) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+
+    const [traceResult, comparisonResult] = await Promise.allSettled([
+      getTrace(share.trace_id),
+      getTraceComparison(share.trace_id),
+    ]);
+
+    const traceData = traceResult.status === "fulfilled" ? traceResult.value : null;
+    if (!traceData) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+
+    const comparison =
+      comparisonResult.status === "fulfilled" ? comparisonResult.value : null;
+
+    return {
+      trace: traceData,
+      comparison: comparison ?? null,
+      shared_at: share.created_at,
+    };
   });
 
 app.post("/projects", async (request, reply) => {

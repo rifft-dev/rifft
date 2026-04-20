@@ -3183,3 +3183,70 @@ export const getAlertCandidatesForTrace = async (traceId: string) => {
     total_cost_usd: trace.total_cost_usd,
   };
 };
+
+// ─── Incident shares ──────────────────────────────────────────────────────────
+
+const ensureIncidentSharesTable = async () => {
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS incident_shares (
+      token TEXT PRIMARY KEY,
+      trace_id TEXT NOT NULL REFERENCES traces(trace_id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      created_by_user_id TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS incident_shares_trace_id_idx ON incident_shares (trace_id);
+  `);
+};
+
+export const createIncidentShare = async (
+  traceId: string,
+  projectId: string,
+  userId: string | null,
+): Promise<string> => {
+  await ensureIncidentSharesTable();
+
+  // Return existing token if the trace already has a share link
+  const existing = await pgPool.query<{ token: string }>(
+    `SELECT token FROM incident_shares WHERE trace_id = $1 LIMIT 1`,
+    [traceId],
+  );
+  if ((existing.rowCount ?? 0) > 0 && existing.rows[0]) {
+    return existing.rows[0].token;
+  }
+
+  const token = randomBytes(16).toString("hex");
+  await pgPool.query(
+    `INSERT INTO incident_shares (token, trace_id, project_id, created_by_user_id) VALUES ($1, $2, $3, $4)`,
+    [token, traceId, projectId, userId],
+  );
+  return token;
+};
+
+export const getIncidentShareByToken = async (
+  token: string,
+): Promise<{ token: string; trace_id: string; project_id: string; created_at: string } | null> => {
+  await ensureIncidentSharesTable();
+
+  const result = await pgPool.query<{
+    token: string;
+    trace_id: string;
+    project_id: string;
+    created_at: Date;
+  }>(
+    `SELECT token, trace_id, project_id, created_at FROM incident_shares WHERE token = $1 LIMIT 1`,
+    [token],
+  );
+
+  if ((result.rowCount ?? 0) === 0 || !result.rows[0]) {
+    return null;
+  }
+
+  const row = result.rows[0];
+  return {
+    token: row.token,
+    trace_id: row.trace_id,
+    project_id: row.project_id,
+    created_at: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+  };
+};
