@@ -282,6 +282,77 @@ const extractJsonObject = (value: string) => {
   return value.trim();
 };
 
+// Extracts quantitative LLM attributes from all spans belonging to one agent.
+// These numbers — token counts, model names, context limits, error messages — are
+// the primary evidence Claude needs to cite in a meaningful failure explanation.
+const extractAgentLlmStats = (spans: Array<{
+  attributes: unknown;
+  status: string;
+  events?: unknown;
+  duration_ms: number;
+}>) => {
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let maxInputTokensSingleCall = 0;
+  let contextLimit: number | null = null;
+  const modelsUsed = new Set<string>();
+  const errorMessages: string[] = [];
+
+  for (const span of spans) {
+    const attrs = span.attributes as Record<string, unknown>;
+
+    const inputTokens =
+      Number(attrs["llm.input_tokens"] ?? attrs["prompt_tokens"] ?? attrs["input_tokens"] ?? 0) || 0;
+    const outputTokens =
+      Number(attrs["llm.output_tokens"] ?? attrs["completion_tokens"] ?? attrs["output_tokens"] ?? 0) || 0;
+    const model = String(attrs["llm.model"] ?? attrs["model"] ?? "").trim();
+    const limit =
+      Number(attrs["context_limit"] ?? attrs["llm.context_limit"] ?? attrs["model_context_limit"] ?? 0) || 0;
+
+    totalInputTokens += inputTokens;
+    totalOutputTokens += outputTokens;
+    if (inputTokens > maxInputTokensSingleCall) maxInputTokensSingleCall = inputTokens;
+    if (model) modelsUsed.add(model);
+    if (limit > 0 && (contextLimit === null || limit < contextLimit)) contextLimit = limit;
+
+    // Pull error messages from OpenTelemetry exception events
+    const events = (Array.isArray(span.events) ? span.events : []) as Array<{
+      name?: string;
+      attributes?: Record<string, unknown>;
+    }>;
+    for (const event of events) {
+      if (event.name === "exception" || event.name === "error") {
+        const msg = String(
+          event.attributes?.["exception.message"] ??
+            event.attributes?.["message"] ??
+            "",
+        ).trim();
+        if (msg && !errorMessages.includes(msg)) {
+          errorMessages.push(msg);
+        }
+      }
+    }
+
+    // Also check span-level error attributes
+    if (span.status === "error") {
+      const errMsg = String(attrs["error.message"] ?? attrs["error"] ?? "").trim();
+      if (errMsg && !errorMessages.includes(errMsg)) {
+        errorMessages.push(errMsg);
+      }
+    }
+  }
+
+  return {
+    total_input_tokens: totalInputTokens > 0 ? totalInputTokens : null,
+    total_output_tokens: totalOutputTokens > 0 ? totalOutputTokens : null,
+    max_input_tokens_single_call: maxInputTokensSingleCall > 0 ? maxInputTokensSingleCall : null,
+    context_limit: contextLimit,
+    models_used: [...modelsUsed],
+    // Truncate long error messages so they fit cleanly in the prompt
+    error_messages: errorMessages.slice(0, 3).map((m) => truncateText(m, 200)),
+  };
+};
+
 const buildFailureExplanationPromptContext = async (traceId: string) => {
   const trace = await getTrace(traceId);
   if (!trace) {
@@ -320,6 +391,15 @@ const buildFailureExplanationPromptContext = async (traceId: string) => {
     } => entry.detail !== null,
   );
 
+  // Build per-agent LLM stats from raw spans for the relevant agents
+  const agentLlmStats: Record<string, ReturnType<typeof extractAgentLlmStats>> = {};
+  for (const agentId of relevantAgentIds) {
+    const agentSpans = trace.spans.filter(
+      (span: { agent_id: string | null }) => span.agent_id === agentId,
+    );
+    agentLlmStats[agentId] = extractAgentLlmStats(agentSpans);
+  }
+
   const highlightedMessages = trace.communication_spans
     .filter(
       (span) =>
@@ -356,6 +436,8 @@ const buildFailureExplanationPromptContext = async (traceId: string) => {
       agents: hydratedAgentDetails.map(({ agent_id, detail }) => ({
         agent_id,
         summary: detail.summary,
+        // Quantitative LLM attributes — cite these with exact values in the explanation
+        llm_stats: agentLlmStats[agent_id] ?? null,
         mast_failures: detail.mast_failures,
         decision_context: detail.decision_context
           ? compactJson(detail.decision_context, 1000)
@@ -388,6 +470,7 @@ const generateFailureExplanationWithAnthropic = async (
         evidence: string[];
         recommended_fix: string;
         confidence: "high" | "medium" | "low";
+        key_stats: Array<{ label: string; value: string; flag: "ok" | "warning" | "critical" }>;
         model: string;
       };
     }
@@ -407,6 +490,40 @@ const generateFailureExplanationWithAnthropic = async (
     throw new Error("no_fatal_failure");
   }
 
+  const systemPrompt = `You are Rifft, an AI observability assistant that diagnoses multi-agent pipeline failures.
+
+Your task: explain WHY a failure happened, tracing the causal chain — not just WHAT label was applied.
+
+Rules:
+- Produce ONLY strict JSON. No prose, no markdown, no code fences.
+- Do NOT invent facts not present in the trace context.
+- When token counts, costs, durations, model names, or error messages are present in the context, you MUST cite them with their exact values — not paraphrased.
+- Trace the causal chain: if one agent produced output that caused a downstream agent to fail, name both agents and the connection explicitly.
+- If an agent's max_input_tokens_single_call approaches or exceeds its context_limit, flag this as a likely cause.
+- If error_messages are present, quote them verbatim (truncated to ~80 chars if long).
+- If a payload preview is marked as truncated, note that rather than assuming what it contained.`;
+
+  const userPrompt = `Analyze this trace context and explain the fatal failure for a developer who needs to fix their agent pipeline right now.
+
+Return strict JSON with exactly this shape:
+{
+  "summary": string,
+  "evidence": string[],
+  "recommended_fix": string,
+  "confidence": "high" | "medium" | "low",
+  "key_stats": [{ "label": string, "value": string, "flag": "ok" | "warning" | "critical" }]
+}
+
+Field rules:
+- summary: one paragraph ≤130 words. Name the failing agent, the MAST failure mode, the upstream cause if one exists, and the concrete impact. Cite at least one specific number from the trace (tokens, cost, duration, etc.).
+- evidence: 2–4 items. EACH item must reference a specific agent ID, span attribute value, token count, cost figure, model name, error message, or payload excerpt from the context. No generic statements like "the agent failed" — cite the data.
+- recommended_fix: one concrete engineering change ≤70 words. Tailor it to the evidence: if tokens overflow, name a specific limit; if bad output propagated, suggest a validation layer at the specific handoff; if a tool call failed, suggest retry logic or a fallback.
+- confidence: "low" if key attributes are null, payloads are heavily truncated, or the causal chain is ambiguous.
+- key_stats: exactly 2–3 objects. Pick the most diagnostically important quantitative facts from this trace. Use "ok" for values in normal range, "warning" for elevated but not catastrophic, "critical" for values that directly contributed to the failure. Examples: input token count vs context limit, total cost, agent duration, error count.
+
+Trace context:
+${JSON.stringify(promptContext.context, null, 2)}`;
+
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -416,13 +533,12 @@ const generateFailureExplanationWithAnthropic = async (
     },
     body: JSON.stringify({
       model: anthropicModel,
-      max_tokens: 700,
-      system:
-        "You are Rifft, an incident analysis assistant for multi-agent traces. Produce concise, evidence-grounded JSON only. Do not invent facts not present in the trace context.",
+      max_tokens: 1100,
+      system: systemPrompt,
       messages: [
         {
           role: "user",
-          content: `Given this trace context, explain the specific fatal failure in plain English for a developer.\n\nReturn strict JSON with this shape:\n{"summary": string, "evidence": string[], "recommended_fix": string, "confidence": "high" | "medium" | "low"}\n\nRules:\n- summary: one paragraph, under 120 words, trace-specific\n- evidence: 2 to 4 bullets, each referencing concrete agents, handoffs, tool calls, or payloads from the trace\n- recommended_fix: one concrete next engineering change, under 60 words\n- confidence: low if the evidence is incomplete or ambiguous\n- Avoid generic taxonomy definitions unless they help explain this exact trace\n- If a payload preview is truncated, say that the preview was truncated rather than assuming details\n\nTrace context:\n${JSON.stringify(promptContext.context, null, 2)}`,
+          content: userPrompt,
         },
       ],
     }),
@@ -451,6 +567,7 @@ const generateFailureExplanationWithAnthropic = async (
     evidence?: string[];
     recommended_fix?: string;
     confidence?: string;
+    key_stats?: Array<{ label?: string; value?: string; flag?: string }>;
   };
 
   if (
@@ -460,6 +577,21 @@ const generateFailureExplanationWithAnthropic = async (
   ) {
     throw new Error("anthropic_invalid_response");
   }
+
+  const validFlags = new Set(["ok", "warning", "critical"]);
+  const keyStats = (Array.isArray(parsed.key_stats) ? parsed.key_stats : [])
+    .filter(
+      (item): item is { label: string; value: string; flag: string } =>
+        typeof item?.label === "string" &&
+        typeof item?.value === "string" &&
+        typeof item?.flag === "string",
+    )
+    .map((item) => ({
+      label: item.label.trim(),
+      value: item.value.trim(),
+      flag: (validFlags.has(item.flag) ? item.flag : "ok") as "ok" | "warning" | "critical",
+    }))
+    .slice(0, 3);
 
   return {
     trace: promptContext.trace,
@@ -473,6 +605,7 @@ const generateFailureExplanationWithAnthropic = async (
           : parsed.confidence === "low"
             ? "low"
             : "medium",
+      key_stats: keyStats,
       model: anthropicModel,
     },
   };
@@ -1606,6 +1739,7 @@ app.get("/traces/:traceId/failure-explanation", async (request, reply) => {
       evidence: generated.explanation.evidence,
       recommendedFix: generated.explanation.recommended_fix,
       confidence: generated.explanation.confidence,
+      keyStats: generated.explanation.key_stats,
       model: generated.explanation.model,
     });
 
@@ -1665,6 +1799,7 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
       evidence: generated.explanation.evidence,
       recommendedFix: generated.explanation.recommended_fix,
       confidence: generated.explanation.confidence,
+      keyStats: generated.explanation.key_stats,
       model: generated.explanation.model,
     });
 

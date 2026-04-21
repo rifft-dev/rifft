@@ -32,7 +32,7 @@ export async function GET() {
 
     const data = (await res.json()) as UsageSummaryResponse;
     return NextResponse.json({
-      subscription_status: data.plan.subscription_status ?? null,
+      subscription_status: data.plan?.subscription_status ?? null,
     });
   } catch {
     return NextResponse.json({ subscription_status: null });

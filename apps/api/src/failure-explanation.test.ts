@@ -176,6 +176,7 @@ test("GET /traces/:traceId/failure-explanation serves stored explanation for pro
     evidence: ["ev-1"],
     recommended_fix: "fix it",
     confidence: "high" as const,
+    key_stats: [] as Array<{ label: string; value: string; flag: "ok" | "warning" | "critical" }>,
     model: "claude-3-5-sonnet-20241022",
     generated_at: "2026-04-20T00:00:00.000Z",
     updated_at: "2026-04-20T00:00:00.000Z",
@@ -221,6 +222,7 @@ test("GET /traces/:traceId/failure-explanation generates an explanation for scal
       evidence: ["ev-a"],
       recommended_fix: "rotate keys",
       confidence: "medium" as const,
+      key_stats: [] as Array<{ label: string; value: string; flag: "ok" | "warning" | "critical" }>,
       model: "claude-3-5-sonnet-20241022",
     },
   };
@@ -231,6 +233,7 @@ test("GET /traces/:traceId/failure-explanation generates an explanation for scal
     evidence: generated.explanation.evidence,
     recommended_fix: generated.explanation.recommended_fix,
     confidence: generated.explanation.confidence,
+    key_stats: [] as Array<{ label: string; value: string; flag: "ok" | "warning" | "critical" }>,
     model: generated.explanation.model,
     generated_at: "2026-04-20T00:00:00.000Z",
     updated_at: "2026-04-20T00:00:00.000Z",

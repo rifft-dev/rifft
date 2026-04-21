@@ -226,6 +226,7 @@ export type TraceFailureExplanation = {
   evidence: string[];
   recommended_fix: string;
   confidence: "high" | "medium" | "low";
+  key_stats: Array<{ label: string; value: string; flag: "ok" | "warning" | "critical" }> | null;
   model: string;
   generated_at: string;
   updated_at: string;

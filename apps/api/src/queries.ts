@@ -192,6 +192,7 @@ export type TraceFailureExplanation = {
   evidence: string[];
   recommended_fix: string;
   confidence: "high" | "medium" | "low";
+  key_stats: Array<{ label: string; value: string; flag: "ok" | "warning" | "critical" }>;
   model: string;
   generated_at: string;
   updated_at: string;
@@ -584,6 +585,11 @@ const ensureTraceFailureExplanations = async () => {
       generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `);
+  // key_stats added after initial release — safe to add to existing tables
+  await pgPool.query(`
+    ALTER TABLE trace_failure_explanations
+      ADD COLUMN IF NOT EXISTS key_stats JSONB
   `);
   await pgPool.query(`
     CREATE INDEX IF NOT EXISTS trace_failure_explanations_project_updated_idx
@@ -2028,11 +2034,12 @@ export const getStoredTraceFailureExplanation = async (
     recommended_fix: string;
     confidence: string;
     model: string;
+    key_stats: unknown;
     generated_at: string | Date;
     updated_at: string | Date;
   }>(
     `
-      SELECT trace_id, project_id, summary, evidence, recommended_fix, confidence, model, generated_at, updated_at
+      SELECT trace_id, project_id, summary, evidence, recommended_fix, confidence, model, key_stats, generated_at, updated_at
       FROM trace_failure_explanations
       WHERE trace_id = $1
       LIMIT 1
@@ -2045,6 +2052,30 @@ export const getStoredTraceFailureExplanation = async (
   }
 
   const row = result.rows[0];
+
+  const rawKeyStats = row.key_stats;
+  const keyStats: Array<{ label: string; value: string; flag: "ok" | "warning" | "critical" }> =
+    Array.isArray(rawKeyStats)
+      ? rawKeyStats
+          .filter(
+            (item): item is { label: string; value: string; flag: string } =>
+              item !== null &&
+              typeof item === "object" &&
+              typeof (item as Record<string, unknown>).label === "string" &&
+              typeof (item as Record<string, unknown>).value === "string",
+          )
+          .map((item) => ({
+            label: item.label,
+            value: item.value,
+            flag:
+              item.flag === "warning"
+                ? "warning"
+                : item.flag === "critical"
+                  ? "critical"
+                  : "ok",
+          }))
+      : [];
+
   return {
     trace_id: row.trace_id,
     project_id: row.project_id,
@@ -2055,6 +2086,7 @@ export const getStoredTraceFailureExplanation = async (
     recommended_fix: row.recommended_fix,
     confidence:
       row.confidence === "high" ? "high" : row.confidence === "low" ? "low" : "medium",
+    key_stats: keyStats,
     model: row.model,
     generated_at: toIsoOrNull(row.generated_at) ?? new Date().toISOString(),
     updated_at: toIsoOrNull(row.updated_at) ?? new Date().toISOString(),
@@ -2068,6 +2100,7 @@ export const upsertTraceFailureExplanation = async ({
   evidence,
   recommendedFix,
   confidence,
+  keyStats,
   model,
 }: {
   traceId: string;
@@ -2076,6 +2109,7 @@ export const upsertTraceFailureExplanation = async ({
   evidence: string[];
   recommendedFix: string;
   confidence: "high" | "medium" | "low";
+  keyStats: Array<{ label: string; value: string; flag: "ok" | "warning" | "critical" }>;
   model: string;
 }) => {
   await ensureTraceFailureExplanations();
@@ -2089,19 +2123,21 @@ export const upsertTraceFailureExplanation = async ({
         evidence,
         recommended_fix,
         confidence,
+        key_stats,
         model
       )
-      VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+      VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7::jsonb, $8)
       ON CONFLICT (trace_id) DO UPDATE SET
         project_id = EXCLUDED.project_id,
         summary = EXCLUDED.summary,
         evidence = EXCLUDED.evidence,
         recommended_fix = EXCLUDED.recommended_fix,
         confidence = EXCLUDED.confidence,
+        key_stats = EXCLUDED.key_stats,
         model = EXCLUDED.model,
         updated_at = NOW()
     `,
-    [traceId, projectId, summary, JSON.stringify(evidence), recommendedFix, confidence, model],
+    [traceId, projectId, summary, JSON.stringify(evidence), recommendedFix, confidence, JSON.stringify(keyStats), model],
   );
 
   return getStoredTraceFailureExplanation(traceId);

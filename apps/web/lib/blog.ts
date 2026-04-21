@@ -58,6 +58,22 @@ export const blogPosts: BlogPostMeta[] = [
       "mast taxonomy agent failures",
     ],
   },
+  {
+    slug: "rifft-vs-langsmith-multi-agent-debugging",
+    title: "Rifft vs LangSmith for multi-agent debugging",
+    description:
+      "A practical comparison of Rifft and LangSmith for debugging multi-agent pipelines — where each tool is strongest, how their debugging models differ, and how to choose.",
+    publishedAt: "2026-04-21",
+    readTime: "10 min read",
+    category: "Comparison",
+    image: "/blog-rifft-vs-langsmith.svg",
+    keywords: [
+      "rifft vs langsmith multi-agent debugging",
+      "langsmith vs rifft",
+      "multi-agent observability comparison",
+      "langsmith alternative for multi-agent",
+    ],
+  },
 ];
 
 export const getBlogPost = (slug: string) =>

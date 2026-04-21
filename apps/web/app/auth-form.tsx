@@ -51,7 +51,7 @@ export function AuthForm({
          Rifft tells you in seconds.
         </h1>
         <p className="max-w-[48ch] text-[17px] leading-7 text-muted-foreground">
-          Debugging a broken agent pipeline means reading logs across every handoff. Rifft replaces that with a causal graph, a failure classification, and a replay path — in one view.
+          When a multi-agent pipeline breaks, finding which agent caused it means reading logs across every handoff — while your pipeline keeps running and your costs keep climbing. Rifft shows you the causal chain, classifies the failure, and lets you fix it without restarting.
         </p>
       </div>
 

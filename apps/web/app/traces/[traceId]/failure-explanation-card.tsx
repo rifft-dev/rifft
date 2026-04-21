@@ -159,6 +159,46 @@ export function FailureExplanationCard({
               <Badge variant="outline">Claude generated</Badge>
               <Badge variant="outline">{state.explanation.confidence} confidence</Badge>
             </div>
+
+            {state.explanation.key_stats && state.explanation.key_stats.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {state.explanation.key_stats.map((stat) => (
+                  <div
+                    key={stat.label}
+                    className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${
+                      stat.flag === "critical"
+                        ? "border-red-500/30 bg-red-500/8"
+                        : stat.flag === "warning"
+                          ? "border-amber-500/30 bg-amber-500/8"
+                          : "border-border bg-background/60"
+                    }`}
+                  >
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${
+                        stat.flag === "critical"
+                          ? "bg-red-500"
+                          : stat.flag === "warning"
+                            ? "bg-amber-400"
+                            : "bg-emerald-400"
+                      }`}
+                    />
+                    <span className="text-muted-foreground">{stat.label}</span>
+                    <span
+                      className={`font-mono font-medium ${
+                        stat.flag === "critical"
+                          ? "text-red-400"
+                          : stat.flag === "warning"
+                            ? "text-amber-300"
+                            : "text-foreground"
+                      }`}
+                    >
+                      {stat.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
             <div className="rounded-2xl border bg-background/60 p-4">
               <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                 What happened
