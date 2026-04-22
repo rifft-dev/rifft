@@ -33,18 +33,84 @@ type FirstTraceResponse = {
 
 type FirstTraceError = "unauthorized" | "forbidden" | "missing_active_project" | "network_error" | null;
 
-type FrameworkOption = "crewai" | "autogen" | "custom";
+type RuntimeOption = "python" | "node";
+type FrameworkOption = "crewai" | "autogen" | "custom" | "mcp";
 
-const frameworkPackages: Record<FrameworkOption, string> = {
-  crewai: "rifft-sdk rifft-crewai",
-  autogen: "rifft-sdk rifft-autogen",
-  custom: "rifft-sdk",
+const runtimeFrameworks: Record<RuntimeOption, FrameworkOption[]> = {
+  python: ["crewai", "autogen", "custom"],
+  node: ["custom", "mcp"],
 };
 
-const frameworkImports: Record<FrameworkOption, string[]> = {
-  crewai: ["import rifft"],
-  autogen: ["import rifft"],
-  custom: ["import rifft"],
+const frameworkLabels: Record<FrameworkOption, string> = {
+  crewai: "CrewAI",
+  autogen: "AutoGen",
+  custom: "Custom",
+  mcp: "MCP",
+};
+
+const buildInstallSnippet = ({
+  runtime,
+  framework,
+  projectId,
+  ingestUrl,
+  apiKey,
+}: {
+  runtime: RuntimeOption;
+  framework: FrameworkOption;
+  projectId: string;
+  ingestUrl: string;
+  apiKey: string | null;
+}) => {
+  if (runtime === "python") {
+    const packages =
+      framework === "crewai"
+        ? "rifft-sdk rifft-crewai"
+        : framework === "autogen"
+          ? "rifft-sdk rifft-autogen"
+          : "rifft-sdk";
+
+    return `pip install ${packages}
+
+import rifft
+
+rifft.init(
+  project_id="${projectId}",
+  endpoint="${ingestUrl}",
+  api_key="${apiKey ?? "rft_live_..."}"
+)`;
+  }
+
+  if (framework === "mcp") {
+    return `npm install @rifft-dev/rifft @rifft-dev/mcp
+
+import { init } from "@rifft-dev/rifft";
+import { instrumentMcpClient } from "@rifft-dev/mcp";
+
+init({
+  project_id: "${projectId}",
+  endpoint: "${ingestUrl}",
+  api_key: "${apiKey ?? "rft_live_..."}",
+});
+
+const tracedClient = instrumentMcpClient(mcpClient, {
+  agent_id: "mcp-client",
+  server_name: "my-mcp-server",
+});`;
+  }
+
+  return `npm install @rifft-dev/rifft
+
+import { init, withSpan } from "@rifft-dev/rifft";
+
+init({
+  project_id: "${projectId}",
+  endpoint: "${ingestUrl}",
+  api_key: "${apiKey ?? "rft_live_..."}",
+});
+
+await withSpan("agent.run", { agent_id: "orchestrator", framework: "custom" }, async () => {
+  // your agent logic here
+});`;
 };
 
 const maskApiKey = (value: string) => `${value.slice(0, 10)}...${value.slice(-6)}`;
@@ -64,19 +130,25 @@ export function FirstTraceOnboarding({
   const [isStartingCheckout, setIsStartingCheckout] = useState(false);
   const [pollingError, setPollingError] = useState<FirstTraceError>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
+  const [runtime, setRuntime] = useState<RuntimeOption>("python");
   const [framework, setFramework] = useState<FrameworkOption>("crewai");
   const installSnippet = useMemo(
-    () => `pip install ${frameworkPackages[framework]}
-
-${frameworkImports[framework].join("\n")}
-
-rifft.init(
-  project_id="${project.id}",
-  endpoint="${ingestUrl}",
-  api_key="${project.api_key ?? "rft_live_..."}"
-)`,
-    [framework, ingestUrl, project.api_key, project.id],
+    () =>
+      buildInstallSnippet({
+        runtime,
+        framework,
+        projectId: project.id,
+        ingestUrl,
+        apiKey: project.api_key,
+      }),
+    [framework, ingestUrl, project.api_key, project.id, runtime],
   );
+
+  useEffect(() => {
+    if (!runtimeFrameworks[runtime].includes(framework)) {
+      setFramework(runtimeFrameworks[runtime][0]);
+    }
+  }, [framework, runtime]);
 
   useEffect(() => {
     if (firstTraceId) {
@@ -257,7 +329,21 @@ rifft.init(
             <div className="space-y-3">
               <div className="text-sm font-medium">Install and send your first trace</div>
               <div className="flex flex-wrap gap-2">
+                {(["python", "node"] as const).map((option) => (
+                  <Button
+                    key={option}
+                    type="button"
+                    variant={runtime === option ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setRuntime(option)}
+                  >
+                    {option === "python" ? "Python" : "Node.js"}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
                 {(["crewai", "autogen", "custom"] as const).map((option) => (
+                  runtimeFrameworks[runtime].includes(option) ? (
                   <Button
                     key={option}
                     type="button"
@@ -265,9 +351,21 @@ rifft.init(
                     size="sm"
                     onClick={() => setFramework(option)}
                   >
-                    {option === "crewai" ? "CrewAI" : option === "autogen" ? "AutoGen" : "Custom"}
+                    {frameworkLabels[option]}
                   </Button>
+                  ) : null
                 ))}
+                {runtimeFrameworks[runtime].includes("mcp") ? (
+                  <Button
+                    key="mcp"
+                    type="button"
+                    variant={framework === "mcp" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setFramework("mcp")}
+                  >
+                    {frameworkLabels.mcp}
+                  </Button>
+                ) : null}
               </div>
               {!canShowSnippet ? (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-muted-foreground">
@@ -400,7 +498,11 @@ rifft.init(
                 <li className="flex items-start gap-2">
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" />
                   <span>
-                    {framework === "crewai"
+                    {runtime === "node" && framework === "mcp"
+                      ? <>Install <code>@rifft-dev/mcp</code> to wrap your MCP client and emit tool-call spans automatically.</>
+                      : runtime === "node"
+                        ? <>Use <code>@rifft-dev/rifft</code> in your Node app, then wrap the important agent and tool boundaries with spans.</>
+                    : framework === "crewai"
                       ? <>If <code>rifft-crewai</code> is installed, <code>rifft.init(...)</code> auto-instruments CrewAI for you.</>
                       : framework === "autogen"
                         ? <>If <code>rifft-autogen</code> is installed, <code>rifft.init(...)</code> auto-instruments AutoGen for you.</>

@@ -302,8 +302,8 @@ export default async function HomePage({
               </div>
 
               <div className="text-sm text-muted-foreground">
-                Works with CrewAI, AutoGen, LangGraph, OpenAI Swarm, LlamaIndex, and any custom
-                SDK.
+                Works with CrewAI, AutoGen, LangGraph, OpenAI Swarm, LlamaIndex, and custom agent
+                stacks.
               </div>
             </div>
           </section>
@@ -314,38 +314,41 @@ export default async function HomePage({
                 Why Rifft
               </div>
               <h2 className="max-w-3xl text-3xl font-semibold tracking-[-0.025em] lg:text-4xl">
-                Built for teams debugging multi-agent failures in production.
+                Built for the failures that are rare enough to be surprising and expensive enough to matter.
               </h2>
               <p className="max-w-3xl text-base text-muted-foreground lg:text-lg">
-                Purpose-built for engineers who need to find the broken handoff quickly, name the
-                failure mode clearly, and test a fix without re-running the whole system.
+                Rifft is for teams running multi-agent workflows where a single bad run can waste
+                time, tokens, and operator attention. Find the broken handoff, identify where bad
+                state actually started, and test the smallest possible fix without restarting
+                everything.
               </p>
             </div>
 
             <div className="mt-8 grid gap-6 md:grid-cols-3">
               <Card className="rounded-[18px] border-border/80 bg-card">
                 <CardContent className="space-y-3 p-6">
-                  <div className="text-lg font-semibold">Causal chain attribution</div>
+                  <div className="text-lg font-semibold">Find the real starting point</div>
                   <p className="text-sm text-muted-foreground">
-                    Root cause attribution past the errored span, so you can see which earlier
-                    agent actually corrupted the run.
+                    When the visible failure is downstream from the real cause, Rifft helps you
+                    trace back to the handoff that actually introduced bad state.
                   </p>
                 </CardContent>
               </Card>
               <Card className="rounded-[18px] border-border/80 bg-card">
                 <CardContent className="space-y-3 p-6">
-                  <div className="text-lg font-semibold">MAST failure classification</div>
+                  <div className="text-lg font-semibold">Understand what kind of failure it is</div>
                   <p className="text-sm text-muted-foreground">
-                    Named failure modes like unverified output, tool loop, handoff mismatch, and
-                    context overflow.
+                    MAST classification turns raw trace noise into recognizable patterns like
+                    unverified output, tool loop, handoff mismatch, and context overflow.
                   </p>
                 </CardContent>
               </Card>
               <Card className="rounded-[18px] border-border/80 bg-card">
                 <CardContent className="space-y-3 p-6">
-                  <div className="text-lg font-semibold">Fork &amp; replay</div>
+                  <div className="text-lg font-semibold">Retry from the exact failure point</div>
                   <p className="text-sm text-muted-foreground">
-                    Resume from any handoff, keep prior steps, and test the smallest possible fix.
+                    Fork from any handoff, keep the successful steps, and test a fix without
+                    rerunning the entire workflow.
                   </p>
                 </CardContent>
               </Card>
@@ -358,7 +361,7 @@ export default async function HomePage({
                 Pricing
               </div>
               <h2 className="text-3xl font-semibold tracking-[-0.025em] lg:text-4xl">
-                Start free, upgrade when your traces get serious.
+                Start free. Upgrade when agent debugging becomes operational.
               </h2>
             </div>
 
@@ -403,7 +406,7 @@ export default async function HomePage({
                 Comparison
               </div>
               <h2 className="text-3xl font-semibold tracking-[-0.025em] lg:text-4xl">
-                Looking for a LangSmith or Langfuse alternative?
+                Tracing tells you what happened. Rifft helps you find why it failed.
               </h2>
             </div>
 
@@ -439,8 +442,8 @@ export default async function HomePage({
             </div>
 
             <p className="mt-4 text-sm text-muted-foreground">
-              Comparison reflects public product information as of April 2026. Let us know if
-              we&apos;re missing something — we keep this table honest.
+              Comparison reflects public product information as of April 2026. If we missed
+              something, tell us and we&apos;ll correct it.
             </p>
           </section>
 
@@ -452,9 +455,9 @@ export default async function HomePage({
                 </div>
                 <div className="space-y-4">
                   <blockquote className="max-w-4xl text-xl font-medium leading-8 tracking-[-0.02em] text-foreground">
-                    “We shipped an agent to prod, it broke on handoff 6 of 9, and Rifft told us
-                    exactly why and let us re-run from step 6. Cut our debug loop from hours to
-                    about two minutes.”
+                    “We didn&apos;t need Rifft for every run. We needed it for the failures that were
+                    expensive, confusing, and impossible to explain from the final error alone.
+                    That&apos;s where it saved us real time.”
                   </blockquote>
                   <div className="text-sm text-muted-foreground">
                     Hana Park, Staff Engineer, ClusterLabs, CrewAI user since 2024.
@@ -469,7 +472,8 @@ export default async function HomePage({
               <div className="space-y-4">
                 <RifftLogo className="h-7 w-auto" />
                 <p className="max-w-xs text-sm text-muted-foreground">
-                  Failure debugging for multi-agent pipelines. Trace, classify, fork, replay.
+                  Incident debugging for multi-agent systems. Built for the failures that are hard
+                  to explain and costly to rerun.
                 </p>
               </div>
               <div className="space-y-3">

@@ -45,13 +45,18 @@ export function AuthForm({
     <div className="w-full max-w-[48rem] space-y-8">
       <div className="space-y-5">
 
-        <h1 className="max-w-[12ch] text-[3rem] font-semibold leading-[1.03] tracking-[-0.025em] text-balance sm:text-[3.15rem] lg:text-[3.35rem]">
-          <span className="italic">Which agent</span> broke your pipeline?
+        <h1 className="max-w-[14ch] text-[3rem] font-semibold leading-[1.03] tracking-[-0.025em] text-balance sm:text-[3.15rem] lg:text-[3.35rem]">
+          For the agent failures
           <br />
-         Rifft tells you in seconds.
+          that are rare,
+          <br />
+          expensive, and hard to explain.
         </h1>
-        <p className="max-w-[48ch] text-[17px] leading-7 text-muted-foreground">
-          When a multi-agent pipeline breaks, finding which agent caused it means reading logs across every handoff — while your pipeline keeps running and your costs keep climbing. Rifft shows you the causal chain, classifies the failure, and lets you fix it without restarting.
+        <p className="max-w-[52ch] text-[17px] leading-7 text-muted-foreground">
+          Most runs are fine. The problem is the failures that take hours to untangle because the
+          visible error is downstream from the real cause. Rifft helps you trace the bad handoff,
+          identify which earlier agent introduced bad state, and replay from the exact failure point
+          instead of rerunning the whole workflow.
         </p>
       </div>
 
@@ -158,32 +163,32 @@ export function AuthForm({
 
       <div className="flex items-center gap-2 text-sm text-emerald-300">
         <CheckCircle2 className="h-4 w-4" />
-        Free — no credit card, 50k spans/mo.
+        Free to start. No credit card. 50K spans per month.
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-[18px] border border-border/70 bg-card/70 p-4">
-          <div className="font-mono text-[2.35rem] leading-none tracking-[-0.04em] text-foreground">
-            14.2k
+          <div className="text-lg font-semibold leading-tight text-foreground">
+            Find the real break
           </div>
           <div className="mt-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-            traces debugged
+            trace the failure back to the handoff that introduced bad state
           </div>
         </div>
         <div className="rounded-[18px] border border-border/70 bg-card/70 p-4">
-          <div className="font-mono text-[2.35rem] leading-none tracking-[-0.04em] text-foreground">
-            800+
+          <div className="text-lg font-semibold leading-tight text-foreground">
+            Replay only what failed
           </div>
           <div className="mt-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-            teams
+            fork from the broken handoff instead of rerunning the whole workflow
           </div>
         </div>
         <div className="rounded-[18px] border border-border/70 bg-card/70 p-4">
-          <div className="font-mono text-[2.35rem] leading-none tracking-[-0.04em] text-foreground">
-            2 min
+          <div className="text-lg font-semibold leading-tight text-foreground">
+            Understand the failure mode
           </div>
           <div className="mt-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-            median time to root cause
+            classify confusing agent failures into something you can act on
           </div>
         </div>
       </div>

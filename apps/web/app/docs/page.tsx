@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PublicNav } from "@/components/public-nav";
 import { siteName, siteUrl } from "@/lib/seo";
+import { QuickstartSnippet } from "./quickstart-snippet";
 
 export const metadata: Metadata = {
   title: "Docs",
@@ -162,20 +163,7 @@ export default function DocsPage() {
             </p>
             <Card className="mt-6 rounded-3xl">
               <CardContent className="space-y-4 p-6">
-                <div className="text-sm text-muted-foreground">Python</div>
-                <pre className="overflow-x-auto rounded-2xl border bg-muted/30 p-4 text-sm">
-{`pip install rifft-sdk rifft-crewai
-
-import rifft
-import rifft.adapters.crewai
-
-rifft.init(
-  project_id="proj_your_project_id",
-  endpoint="https://ingest.rifft.dev",
-  api_key="rft_live_xxxxx",
-)`}
-                </pre>
-                <div className="text-sm text-muted-foreground">Then run one real workflow and open the first trace in Rifft.</div>
+                <QuickstartSnippet />
               </CardContent>
             </Card>
           </section>

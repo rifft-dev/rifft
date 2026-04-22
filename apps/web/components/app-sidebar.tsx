@@ -209,16 +209,21 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
   return (
     <aside
       className={cn(
-        "shrink-0 overflow-hidden bg-[radial-gradient(circle_at_top,hsl(var(--chart-1))/0.08,transparent_28%),hsl(var(--sidebar-background))] text-sidebar-foreground",
+        "shrink-0 overflow-hidden bg-sidebar-background/96 text-sidebar-foreground backdrop-blur supports-[backdrop-filter]:bg-sidebar-background/90",
         mobile
           ? "flex h-full w-full flex-col"
-          : "hidden w-56 border-r border-sidebar-border lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col",
+          : "hidden w-52 border-r border-sidebar-border/80 lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col",
       )}
     >
-      <div className="border-b border-sidebar-border px-4 py-4">
-        <RifftLogo wordmark={false} className="h-6 w-auto text-foreground" />
+      <div className="border-b border-sidebar-border/70 px-3 py-3">
+        <div className="flex items-center gap-2 px-1">
+          <div className="flex h-8 w-8 items-center justify-center rounded-2xl border border-sidebar-border/80 bg-background/80 shadow-sm">
+            <RifftLogo wordmark={false} className="h-4 w-auto text-foreground" />
+          </div>
+          <div className="text-[13px] font-medium tracking-[-0.02em] text-foreground">Rifft</div>
+        </div>
 
-        <div className="mt-4">
+        <div className="mt-3">
           {projects.length > 1 ? (
             <Select
               value={activeProjectId}
@@ -264,7 +269,7 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
                 closeMobileNav();
               }}
             >
-              <SelectTrigger className="h-11 !border-0 bg-transparent px-0 text-sidebar-foreground shadow-none ring-0 ring-offset-0 hover:bg-transparent focus:ring-0 focus:ring-offset-0">
+              <SelectTrigger className="h-10 rounded-2xl border border-sidebar-border/70 bg-background/60 px-3 text-sidebar-foreground shadow-none ring-0 ring-offset-0 hover:bg-background/80 focus:ring-0 focus:ring-offset-0">
                 <SelectValue placeholder="Choose project" />
               </SelectTrigger>
               <SelectContent>
@@ -296,14 +301,17 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
               </SelectContent>
             </Select>
           ) : (
-            <div className="px-2 py-2 text-sm font-medium">
+            <div className="rounded-2xl border border-sidebar-border/70 bg-background/60 px-3 py-2.5 text-sm font-medium">
               {projects[0]?.name ?? "Workspace"}
             </div>
           )}
         </div>
       </div>
-      <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
-        <div className="space-y-2">
+      <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+        <div className="px-2 pb-2 text-[11px] font-medium uppercase tracking-[0.16em] text-sidebar-foreground/45">
+          Navigate
+        </div>
+        <div className="space-y-1">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -312,55 +320,68 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition-colors",
+                  "group flex items-center gap-3 rounded-xl px-3 py-2 text-[13px] transition-colors",
                   active
-                    ? "bg-white/8 text-white shadow-sm"
-                    : "text-sidebar-foreground/70 hover:bg-white/5 hover:text-sidebar-foreground",
+                    ? "bg-zinc-800 text-zinc-100"
+                    : "text-sidebar-foreground/68 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
                 )}
                 onClick={closeMobileNav}
               >
-                <Icon className="h-4 w-4" />
+                <Icon
+                  className={cn(
+                    "h-4 w-4 shrink-0 transition-opacity",
+                    active ? "opacity-100" : "opacity-70 group-hover:opacity-100",
+                  )}
+                />
                 <span>{item.label}</span>
               </Link>
             );
           })}
         </div>
-        <div className="mt-6 border-t border-sidebar-border pt-4">
+        <div className="mt-5 border-t border-sidebar-border/70 pt-3">
+          <div className="px-2 pb-2 text-[11px] font-medium uppercase tracking-[0.16em] text-sidebar-foreground/45">
+            Resources
+          </div>
           <Link
             href={docsHref}
             className={cn(
-              "flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition-colors",
+              "group flex items-center gap-3 rounded-xl px-3 py-2 text-[13px] transition-colors",
               !docsIsExternal && pathname === "/docs"
-                ? "bg-white/8 text-white shadow-sm"
-                : "text-sidebar-foreground/70 hover:bg-white/5 hover:text-sidebar-foreground",
+                ? "bg-zinc-800 text-zinc-100"
+                : "text-sidebar-foreground/68 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
             )}
             target="_blank"
             rel="noreferrer"
             onClick={closeMobileNav}
           >
-            <BookOpen className="h-4 w-4" />
+            <BookOpen
+              className={cn(
+                "h-4 w-4 shrink-0 transition-opacity",
+                !docsIsExternal && pathname === "/docs" ? "opacity-100" : "opacity-70 group-hover:opacity-100",
+              )}
+            />
             <span>Docs</span>
           </Link>
         </div>
         {sessionExpired ? (
-          <p className="px-4 pt-3 text-xs text-amber-700 dark:text-amber-300">
+          <p className="px-3 pt-3 text-xs text-amber-700 dark:text-amber-300">
             Session expired. Refresh to resume project updates.
           </p>
         ) : null}
       </nav>
-      <div className="mt-auto border-t border-sidebar-border bg-sidebar-background/95 p-3 backdrop-blur supports-[backdrop-filter]:bg-sidebar-background/85">
+      <div className="mt-auto border-t border-sidebar-border/70 bg-sidebar-background/95 p-3 backdrop-blur supports-[backdrop-filter]:bg-sidebar-background/85">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-sidebar-accent/80">
-              <Avatar className="h-9 w-9">
+            <button className="flex w-full items-center gap-3 rounded-2xl px-2.5 py-2.5 text-left transition-colors hover:bg-sidebar-accent/80">
+              <Avatar className="h-8 w-8">
                 <AvatarImage src={user.user_metadata.avatar_url as string | undefined} />
                 <AvatarFallback>{getInitials(user.email)}</AvatarFallback>
               </Avatar>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium">{getUserLabel(user.email)}</div>
-                <div className="truncate text-xs text-muted-foreground">{user.email}</div>
+                <div className="truncate text-[13px] font-medium">{getUserLabel(user.email)}</div>
+                <div className="truncate text-[11px] text-muted-foreground">{user.email}</div>
               </div>
-              <EllipsisVertical className="h-4 w-4 text-muted-foreground" />
+              <EllipsisVertical className="h-4 w-4 text-muted-foreground/80" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-64">
