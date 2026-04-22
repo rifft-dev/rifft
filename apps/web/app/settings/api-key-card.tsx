@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Copy, RefreshCcw } from "lucide-react";
 import { toast } from "sonner";
@@ -22,6 +22,11 @@ export function ApiKeyCard({
   const [isRegenerating, setIsRegenerating] = useState(false);
   const router = useRouter();
   const displayValue = apiKey ? (revealed ? apiKey : maskApiKey(apiKey)) : "Owner access required";
+
+  useEffect(() => {
+    setRevealed(false);
+    setIsRegenerating(false);
+  }, [projectId, apiKey]);
 
   return (
     <div className="space-y-3">

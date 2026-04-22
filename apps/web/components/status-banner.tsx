@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { statusPageHref } from "@/lib/status";
 
 type HealthResponse = {
   degraded: boolean;
@@ -9,24 +10,44 @@ type HealthResponse = {
 
 // Poll interval in ms — every 60 seconds is enough for a status banner
 const POLL_INTERVAL_MS = 60_000;
+const CONFIRM_DEGRADED_MS = 5_000;
 
 export function StatusBanner() {
   const [degraded, setDegraded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    let consecutiveDegradedChecks = 0;
+    let confirmTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const check = async () => {
+      let nextDegraded = false;
+
       try {
         const res = await fetch("/api/health", { cache: "no-store" });
         if (!res.ok) {
-          if (!cancelled) setDegraded(true);
-          return;
+          nextDegraded = true;
+        } else {
+          const data = (await res.json()) as HealthResponse;
+          nextDegraded = data.degraded ?? false;
         }
-        const data = (await res.json()) as HealthResponse;
-        if (!cancelled) setDegraded(data.degraded ?? false);
       } catch {
-        if (!cancelled) setDegraded(true);
+        nextDegraded = true;
+      }
+
+      consecutiveDegradedChecks = nextDegraded ? consecutiveDegradedChecks + 1 : 0;
+
+      if (!cancelled) {
+        setDegraded(consecutiveDegradedChecks >= 2);
+      }
+
+      if (nextDegraded && consecutiveDegradedChecks === 1) {
+        if (confirmTimeout) {
+          clearTimeout(confirmTimeout);
+        }
+        confirmTimeout = setTimeout(() => {
+          void check();
+        }, CONFIRM_DEGRADED_MS);
       }
     };
 
@@ -35,6 +56,9 @@ export function StatusBanner() {
 
     return () => {
       cancelled = true;
+      if (confirmTimeout) {
+        clearTimeout(confirmTimeout);
+      }
       clearInterval(id);
     };
   }, []);
@@ -49,9 +73,9 @@ export function StatusBanner() {
     >
       Data may be delayed — we&apos;re working on it.{" "}
       <a
-        href="https://status.rifft.dev"
-        target="_blank"
-        rel="noopener noreferrer"
+        href={statusPageHref}
+        target={statusPageHref.startsWith("http") ? "_blank" : undefined}
+        rel={statusPageHref.startsWith("http") ? "noopener noreferrer" : undefined}
         className="underline underline-offset-2 hover:opacity-80 transition-opacity"
       >
         Check status

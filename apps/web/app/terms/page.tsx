@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PublicNav } from "@/components/public-nav";
 import { siteName, siteUrl } from "@/lib/seo";
+import { statusPageHref } from "@/lib/status";
 
 export const metadata: Metadata = {
   title: "Terms of Service",
@@ -126,7 +127,11 @@ export default function TermsPage() {
           <p>
             We aim to maintain high availability but do not guarantee any specific uptime percentage
             except where stated in a separately executed service level agreement. Scheduled maintenance
-            will be announced via status.rifft.dev where possible.
+            will be announced via{" "}
+            <a href={statusPageHref}>
+              {statusPageHref.startsWith("http") ? "status.rifft.dev" : "the local status page"}
+            </a>{" "}
+            where possible.
           </p>
           <p>
             Support is provided by email for Pro and Scale plans, and via community channels for Free

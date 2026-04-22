@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
   getCloudProjects,
-  getOptimizationSuggestions,
   getProjectAlerts,
   getProjectSettings,
   getProjectUsageSummary,
@@ -13,9 +12,7 @@ import {
 import { requireCloudProject } from "../lib/require-cloud-project";
 import { ApiKeyCard } from "./api-key-card";
 import { AlertsCard } from "./alerts-card";
-import { OptimizationCard } from "./optimization-card";
 import { CorrelationCard } from "./correlation-card";
-import { AgentDiffCard } from "./agent-diff-card";
 import { InviteMemberCard } from "../invite-member-card";
 import { ManageBillingButton } from "./manage-billing-button";
 import { RefreshStatusButton } from "./refresh-status-button";
@@ -38,12 +35,6 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
     getCloudProjects(),
     getProjectAlerts(),
   ]);
-
-  // Fetch optimisation suggestions only for Scale — the endpoint returns 403 for other plans
-  const isScalePlan = usageSummary.plan.key === "scale";
-  const optimizationResult = isScalePlan
-    ? await getOptimizationSuggestions().catch(() => null)
-    : null;
   const workspaces = [...cloudProjects.projects].sort((a, b) => {
     const left = new Date(a.created_at).getTime();
     const right = new Date(b.created_at).getTime();
@@ -205,13 +196,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
         canManage={project.permissions.can_update_settings}
       />
 
-      {optimizationResult ? (
-        <OptimizationCard result={optimizationResult} />
-      ) : null}
-
       {isPaidPlan ? <CorrelationCard projectId={project.id} /> : null}
-
-      {isPaidPlan ? <AgentDiffCard projectId={project.id} /> : null}
 
       <Card className="rounded-3xl">
         <CardHeader>

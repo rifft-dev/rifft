@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, Mail, MessageSquareWarning, TrendingUp } from "lucide-react";
+import { Bell, Mail, MessageSquareWarning } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -93,11 +93,20 @@ export function AlertsCard({
   const [isSaving, setIsSaving] = useState(false);
   const [testingChannel, setTestingChannel] = useState<"slack" | "email" | null>(null);
   const [fatalFailuresEnabled, setFatalFailuresEnabled] = useState(alerts.fatal_failures_enabled);
-  const [regressionDigestEnabled, setRegressionDigestEnabled] = useState(alerts.regression_digest_enabled);
   const [slackWebhookUrl, setSlackWebhookUrl] = useState("");
   const [email, setEmail] = useState(alerts.email.target ?? "");
   const [clearSlack, setClearSlack] = useState(false);
   const [clearEmail, setClearEmail] = useState(false);
+
+  useEffect(() => {
+    setFatalFailuresEnabled(alerts.fatal_failures_enabled);
+    setSlackWebhookUrl("");
+    setEmail(alerts.email.target ?? "");
+    setClearSlack(false);
+    setClearEmail(false);
+    setTestingChannel(null);
+    setIsSaving(false);
+  }, [projectId, alerts]);
 
   const slackBadge = useMemo(
     () =>
@@ -130,7 +139,7 @@ export function AlertsCard({
         },
         body: JSON.stringify({
           fatal_failures_enabled: fatalFailuresEnabled,
-          regression_digest_enabled: regressionDigestEnabled,
+          regression_digest_enabled: false,
           slack_webhook_url: clearSlack ? null : slackWebhookUrl.trim() || undefined,
           alert_email: clearEmail ? null : email.trim() || null,
         }),
@@ -345,34 +354,6 @@ export function AlertsCard({
               </p>
             </div>
           </label>
-          <label className="flex items-start gap-3 rounded-xl border bg-muted/20 px-3 py-3">
-            <input
-              type="checkbox"
-              className="mt-1 h-4 w-4"
-              checked={regressionDigestEnabled}
-              disabled={!alerts.regression_available || !canManage}
-              onChange={(event) => setRegressionDigestEnabled(event.target.checked)}
-            />
-            <div className="flex-1 space-y-1">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="h-3.5 w-3.5" />
-                <div className="text-sm font-medium">Weekly digest</div>
-                <Badge variant={alerts.regression_available ? "default" : "outline"}>
-                  Scale
-                </Badge>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Every Monday, receive a summary of span volume, fatal failures, top agents by
-                activity, and any failure modes trending upward vs the prior three weeks — so you
-                catch regressions before they become patterns you have to hunt down manually.
-              </p>
-              {!alerts.regression_available ? (
-                <p className="text-xs text-muted-foreground/70">
-                  Upgrade to Cloud Scale to enable the weekly digest.
-                </p>
-              ) : null}
-            </div>
-          </label>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -415,7 +396,7 @@ export function AlertsCard({
                         {delivery.event_type === "test"
                           ? "Test alert"
                           : delivery.event_type === "regression_digest"
-                          ? "Weekly digest"
+                          ? "Automated report"
                           : "Fatal failure"}
                       </span>
                     </div>

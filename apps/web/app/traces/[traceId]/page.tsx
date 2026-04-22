@@ -4,18 +4,15 @@ import { AlertTriangle, ArrowLeft, GitBranch, TrendingDown, TrendingUp } from "l
 import {
   getAgentDetail,
   getProjectSettings,
-  getProjectUsageSummary,
   getForkDrafts,
   getProjectBaseline,
   getTraceComparison,
   getTraceSnapshot,
 } from "../../lib/api";
-import { buildIncidentReport } from "../../lib/incident-report";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/utils";
 import { InteractiveTraceDetail } from "./interactive-trace-detail";
-import { ShareIncidentReport } from "./share-incident-report";
 import { SetBaselineButton } from "./set-baseline-button";
 
 const formatSignedNumber = (value: number, unit = "") => {
@@ -66,10 +63,9 @@ export default async function TraceDetailPage({
       getForkDrafts(traceId),
       getProjectBaseline(),
       getProjectSettings(),
-      getProjectUsageSummary(),
     ]);
     const { trace, graph, timeline } = snapshot;
-    const [comparisonResult, forkDraftsResult, baselineResult, projectSettingsResult, usageSummaryResult] = ancillaryResults;
+    const [comparisonResult, forkDraftsResult, baselineResult, projectSettingsResult] = ancillaryResults;
     const comparisonResponse =
       comparisonResult.status === "fulfilled" ? comparisonResult.value : { comparison: null };
     const forkDrafts =
@@ -85,9 +81,6 @@ export default async function TraceDetailPage({
               can_update_settings: false,
             },
           };
-    const planKey =
-      usageSummaryResult.status === "fulfilled" ? usageSummaryResult.value.plan.key : "free";
-    const publicLinkAvailable = planKey === "pro" || planKey === "scale";
     const partialFailures = ancillaryResults.filter((result) => result.status === "rejected").length;
     const agentDetails = await Promise.all(
       graph.nodes.map(async (node) => {
@@ -111,7 +104,6 @@ export default async function TraceDetailPage({
   const baseline = baselineResponse.baseline;
   const isCurrentBaseline = baseline?.trace_id === trace.trace_id;
   const comparisonData = comparison ?? null;
-  const incidentReport = buildIncidentReport(trace, comparisonData);
   const hasIncidentContext = trace.mast_failures.length > 0 || trace.status === "error";
 
     return (
@@ -152,13 +144,7 @@ export default async function TraceDetailPage({
   traceId={trace.trace_id}
   isCurrentBaseline={isCurrentBaseline}
   canUpdate={projectSettings.permissions.can_update_settings}
-/>                {publicLinkAvailable ? (
-                  <ShareIncidentReport
-                    traceId={trace.trace_id}
-                    projectId={projectSettings.id ?? trace.project_id}
-                    report={incidentReport}
-                  />
-                ) : null}
+/>
               </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">

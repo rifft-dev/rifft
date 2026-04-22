@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { PublicNav } from "@/components/public-nav";
 import { RifftLogo } from "@/components/rifft-logo";
 import { siteDescription, siteName, siteUrl } from "@/lib/seo";
+import { statusPageHref } from "@/lib/status";
 import { AuthForm } from "./auth-form";
 import { TryRifftButton } from "./try-rifft-button";
 
@@ -61,7 +62,6 @@ const pricingCards = [
       "Email support",
       "Slack and email alerts",
       "Natural language failure explanations",
-      "Shareable incident links",
     ],
     cta: "Start with Pro",
     featured: true,
@@ -76,8 +76,6 @@ const pricingCards = [
       "1-year retention",
       "Everything in Pro",
       "Automatic regression detection",
-      "Weekly digest reports",
-      "Cost and latency optimisation suggestions",
       "Priority support",
       "$5 per 100K spans above 2M",
     ],
@@ -514,10 +512,15 @@ export default async function HomePage({
 
             <div className="mt-12 flex flex-col gap-4 border-t border-border pt-6 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
               <div>© 2026 Rifft Inc.</div>
-              <div className="flex items-center gap-2">
+              <a
+                className="flex items-center gap-2 hover:text-foreground transition-colors"
+                href={statusPageHref}
+                target={statusPageHref.startsWith("http") ? "_blank" : undefined}
+                rel={statusPageHref.startsWith("http") ? "noopener noreferrer" : undefined}
+              >
                 <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-400" />
-                All systems operational · status.rifft.dev
-              </div>
+                All systems operational · {statusPageHref.startsWith("http") ? "status.rifft.dev" : "local status"}
+              </a>
             </div>
           </footer>
         </div>

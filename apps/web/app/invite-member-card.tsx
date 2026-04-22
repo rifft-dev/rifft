@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, Clock, Loader2, RefreshCcw, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
@@ -33,14 +33,21 @@ export function InviteMemberCard({
   const [email, setEmail] = useState("");
   const [isInviting, setIsInviting] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const loadSequence = useRef(0);
 
   const loadMembers = async () => {
+    const requestId = loadSequence.current + 1;
+    loadSequence.current = requestId;
     setIsLoading(true);
     setLoadError(false);
+    setMembers([]);
     try {
       const response = await fetch(`/api/projects/${projectId}/members`, {
         cache: "no-store",
       });
+      if (loadSequence.current !== requestId) {
+        return;
+      }
       if (response.ok) {
         const data = (await response.json()) as { members: Member[] };
         setMembers(data.members ?? []);
@@ -48,13 +55,20 @@ export function InviteMemberCard({
         setLoadError(true);
       }
     } catch {
-      setLoadError(true);
+      if (loadSequence.current === requestId) {
+        setLoadError(true);
+      }
     } finally {
-      setIsLoading(false);
+      if (loadSequence.current === requestId) {
+        setIsLoading(false);
+      }
     }
   };
 
   useEffect(() => {
+    setEmail("");
+    setIsInviting(false);
+    setRemovingId(null);
     void loadMembers();
   }, [projectId]);
 

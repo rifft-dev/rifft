@@ -68,6 +68,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isDocsRoute = pathname.startsWith("/docs");
   const isBlogRoute = pathname.startsWith("/blog");
   const isLegalRoute = pathname.startsWith("/privacy") || pathname.startsWith("/terms");
+  const isStatusRoute = pathname.startsWith("/status");
   const isPublicLandingRoute = pathname === "/";
   const nextPath = searchParams.get("next") ?? defaultAuthedRoute;
   const mobileRouteLabel = getMobileRouteLabel(pathname);
@@ -117,7 +118,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (!isAuthRoute && !isBootstrapRoute && !isPublicLandingRoute && !isDocsRoute && !isBlogRoute && !isLegalRoute) {
+    if (!isAuthRoute && !isBootstrapRoute && !isPublicLandingRoute && !isDocsRoute && !isBlogRoute && !isLegalRoute && !isStatusRoute) {
       const target = pathname === "/" ? defaultAuthedRoute : pathname;
       router.replace(`/auth?next=${encodeURIComponent(target)}`);
     }
@@ -129,13 +130,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     isLegalRoute,
     isLoading,
     isPublicLandingRoute,
+    isStatusRoute,
     nextPath,
     pathname,
     router,
     user,
   ]);
 
-  if (isAuthRoute || isBootstrapRoute || isPublicLandingRoute || isDocsRoute || isBlogRoute || isLegalRoute) {
+  if (isAuthRoute || isBootstrapRoute || isPublicLandingRoute || isDocsRoute || isBlogRoute || isLegalRoute || isStatusRoute) {
     return <div className="min-h-screen bg-background">{children}</div>;
   }
 

@@ -5,6 +5,16 @@ import Link from "next/link";
 import { AlertCircle } from "lucide-react";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 
+const syncServerSessionCookie = async (accessToken: string | null) => {
+  await fetch("/api/auth/session", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ accessToken }),
+  });
+};
+
 export function AuthCallback({
   code,
   nextPath,
@@ -38,7 +48,8 @@ export function AuthCallback({
       if (exchangeError) {
         const { data } = await client.auth.getSession();
         if (!cancelled && data.session) {
-          window.location.replace(`/auth?next=${encodeURIComponent(nextPath)}`);
+          await syncServerSessionCookie(data.session.access_token);
+          window.location.replace(nextPath);
           return;
         }
 
@@ -46,7 +57,9 @@ export function AuthCallback({
         return;
       }
 
-      window.location.replace(`/auth?next=${encodeURIComponent(nextPath)}`);
+      const { data } = await client.auth.getSession();
+      await syncServerSessionCookie(data.session?.access_token ?? null);
+      window.location.replace(nextPath);
     })();
 
     return () => {

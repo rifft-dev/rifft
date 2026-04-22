@@ -68,7 +68,7 @@ export default function PrivacyPage() {
           <p>We use the information we collect to:</p>
           <ul className="list-disc space-y-1 pl-5">
             <li>Provide, operate, and improve the Service</li>
-            <li>Send transactional emails — magic links, billing receipts, alert notifications, and weekly digest reports (Scale plan)</li>
+            <li>Send transactional emails — magic links, billing receipts, and alert notifications</li>
             <li>Enforce usage limits and billing</li>
             <li>Investigate security incidents and abuse</li>
             <li>Comply with legal obligations</li>

@@ -57,6 +57,8 @@ import {
 const port = Number(process.env.PORT ?? 4000);
 const databaseUrl = process.env.DATABASE_URL ?? "";
 const clickhouseUrl = process.env.CLICKHOUSE_URL ?? "";
+const clickhouseUser = process.env.CLICKHOUSE_USER ?? "default";
+const clickhousePassword = process.env.CLICKHOUSE_PASSWORD ?? "";
 const supabaseUrl = process.env.SUPABASE_URL ?? "";
 
 type AuthenticatedUser = {
@@ -724,6 +726,11 @@ export const createApp = (
         const tid = setTimeout(() => ctrl.abort(), 3000);
         const res = await fetch(clickhouseUrl, {
           method: "POST",
+          headers: {
+            "Content-Type": "text/plain",
+            "X-ClickHouse-User": clickhouseUser,
+            "X-ClickHouse-Key": clickhousePassword,
+          },
           body: "SELECT 1",
           signal: ctrl.signal,
         });

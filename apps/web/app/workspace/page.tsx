@@ -2,11 +2,7 @@ import Link from "next/link";
 import {
   AlertTriangle,
   ArrowRight,
-  CheckCircle2,
-  CreditCard,
   Flag,
-  Sparkles,
-  TimerReset,
   TrendingDown,
   TrendingUp,
   Workflow,
@@ -20,7 +16,6 @@ import {
   getProjectBaseline,
   getProjectInsights,
   getProjectSettings,
-  getProjectUsageSummary,
   getTraceComparison,
   getTraces,
 } from "../lib/api";
@@ -46,8 +41,7 @@ const formatRelative = (value: string) => {
 
 export default async function WorkspacePage() {
   await requireCloudProject("/workspace");
-  const [usageSummary, traceData, insightSummary, baselineResponse, projectSettings] = await Promise.all([
-    getProjectUsageSummary(),
+  const [traceData, insightSummary, baselineResponse, projectSettings] = await Promise.all([
     getTraces(),
     getProjectInsights().catch(() => ({
       recent_trace_window: 20,
@@ -65,11 +59,9 @@ export default async function WorkspacePage() {
     traces[0] ??
     null;
   const recentHealthyTrace = traces.find((trace) => trace.status === "ok") ?? null;
-  const usagePercentage = Math.round(usageSummary.usage.usage_ratio * 100);
   const nextTraceTone = latestFailingTrace ? getTraceToneLabels(latestFailingTrace) : null;
   const nextTraceToneCard = latestFailingTrace ? getTraceToneCard(latestFailingTrace) : null;
   const healthyTraceTone = recentHealthyTrace ? getTraceToneLabels(recentHealthyTrace) : null;
-  const healthyTraceToneCard = recentHealthyTrace ? getTraceToneCard(recentHealthyTrace) : null;
   const baseline = baselineResponse.baseline;
   const latestFailingComparison =
     latestFailingTrace && baseline && baseline.trace_id !== latestFailingTrace.trace_id
@@ -110,7 +102,7 @@ export default async function WorkspacePage() {
       <section className="section-fade overflow-hidden rounded-[2rem] border bg-[radial-gradient(circle_at_top_left,hsl(var(--destructive))/0.14,transparent_28%),radial-gradient(circle_at_top_right,hsl(var(--chart-1))/0.14,transparent_30%),hsl(var(--card))] p-8 shadow-sm">
         <div className="grid gap-8 xl:grid-cols-[1.2fr_0.8fr]">
           <div className="space-y-5">
-            <Badge variant="outline">Mission control</Badge>
+            <Badge variant="outline">Incident triage</Badge>
             <div className="space-y-4">
               <h1 className="max-w-4xl text-4xl font-semibold tracking-tight lg:text-6xl">
                 See which run needs you next.
@@ -128,12 +120,12 @@ export default async function WorkspacePage() {
                 </Link>
               </Button>
               <Button asChild variant="outline">
-                <Link href="/settings">Review plan and usage</Link>
+                <Link href="/settings">Open settings</Link>
               </Button>
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+          <div className="grid gap-3">
             <div
               className={`rounded-2xl border p-4 backdrop-blur ${
                 nextTraceToneCard ?? "border-destructive/30 bg-background/65"
@@ -164,22 +156,11 @@ export default async function WorkspacePage() {
                 <div className="mt-3 text-sm text-muted-foreground">No active incidents yet.</div>
               )}
             </div>
-            <div className="rounded-2xl border bg-background/65 p-4 backdrop-blur">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <CreditCard className="h-4 w-4" />
-                Plan and usage
-              </div>
-              <div className="mt-3 text-2xl font-semibold">{usageSummary.plan.name}</div>
-              <div className="mt-2 text-xs text-muted-foreground">
-                {formatSpanCount(usageSummary.usage.used_spans)} of{" "}
-                {formatSpanCount(usageSummary.usage.included_spans)} spans this month
-              </div>
-            </div>
           </div>
         </div>
       </section>
 
-      <section className="stagger-1 section-fade grid gap-4 xl:grid-cols-3">
+      <section className="stagger-1 section-fade">
         <Card className="surface-lift rounded-3xl shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
@@ -215,76 +196,6 @@ export default async function WorkspacePage() {
             ) : (
               <p className="text-sm text-muted-foreground">
                 No failing traces yet. Your next trace will show up here.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="surface-lift rounded-3xl shadow-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <TimerReset className="h-5 w-5" />
-              Monthly usage
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-end justify-between gap-3">
-              <div>
-                <div className="text-3xl font-semibold">{usagePercentage}%</div>
-                <div className="text-sm text-muted-foreground">of included usage consumed</div>
-              </div>
-              <Badge variant={usageSummary.plan.key === "pro" ? "default" : "outline"}>
-                {usageSummary.plan.key === "pro" ? "Paid" : "Free"}
-              </Badge>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-primary"
-                style={{ width: `${Math.min(usagePercentage, 100)}%` }}
-              />
-            </div>
-            <div className="text-sm text-muted-foreground">
-              {formatSpanCount(usageSummary.usage.used_spans)} of{" "}
-              {formatSpanCount(usageSummary.usage.included_spans)} spans
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="surface-lift rounded-3xl shadow-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-              Most recent healthy run
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {recentHealthyTrace ? (
-              <>
-                <div
-                  className={`rounded-2xl border p-4 ${healthyTraceToneCard ?? "bg-muted/20"}`}
-                >
-                  <div className="font-mono text-sm">
-                    {getTraceDisplayName(recentHealthyTrace)}
-                  </div>
-                  <div className="mt-2">
-                    <span
-                      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.12em] ${healthyTraceTone?.labelClass}`}
-                    >
-                      {healthyTraceTone?.label}
-                    </span>
-                  </div>
-                  <div className="mt-2 text-sm text-muted-foreground">
-                    {recentHealthyTrace.agent_count} agents •{" "}
-                    {formatRelative(recentHealthyTrace.started_at)}
-                  </div>
-                </div>
-                <Button asChild variant="outline" className="w-full">
-                  <Link href={`/traces/${recentHealthyTrace.trace_id}`}>Open healthy baseline</Link>
-                </Button>
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                No successful traces yet. Once one lands, use it as your baseline.
               </p>
             )}
           </CardContent>
@@ -595,8 +506,8 @@ export default async function WorkspacePage() {
         )}
       </section>
 
-      <section className="stagger-2 section-fade grid gap-4 xl:grid-cols-3">
-        <Card className="surface-lift rounded-3xl shadow-sm xl:col-span-2">
+      <section className="stagger-2 section-fade">
+        <Card className="surface-lift rounded-3xl shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
               <Workflow className="h-5 w-5" />
@@ -641,50 +552,6 @@ export default async function WorkspacePage() {
                 </div>
               </Link>
             ))}
-          </CardContent>
-        </Card>
-
-        <Card className="surface-lift rounded-3xl shadow-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Sparkles className="h-5 w-5" />
-              What to do next
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm text-muted-foreground">
-            {topInsights[0] ? (
-              <>
-                <p>
-                  The strongest recurring MAST signal right now is{" "}
-                  <span className="font-medium text-foreground">
-                    {getMastMeta(topInsights[0].mode).label.toLowerCase()}
-                  </span>
-                  . That pattern shows up in {topInsights[0].affected_trace_count} of your last{" "}
-                  {topInsights[0].recent_trace_window} traces.
-                </p>
-                <p>
-                  Open the latest example, confirm the failure path in the causal graph, then use
-                  fork and replay to test a fix at the exact handoff point — without restarting
-                  your whole agent pipeline.
-                </p>
-                {topInsights[0].latest_trace_id ? (
-                  <Button asChild variant="outline" className="w-full">
-                    <Link href={`/traces/${topInsights[0].latest_trace_id}`}>Open latest example</Link>
-                  </Button>
-                ) : null}
-              </>
-            ) : (
-              <>
-                <p>
-                  No recurring patterns yet. Send a few more instrumented runs and Rifft will
-                  start grouping the MAST failure modes that repeat across traces — then call out
-                  the one worth fixing first.
-                </p>
-                <Button asChild variant="outline" className="w-full">
-                  <Link href="/onboarding">Send another trace</Link>
-                </Button>
-              </>
-            )}
           </CardContent>
         </Card>
       </section>

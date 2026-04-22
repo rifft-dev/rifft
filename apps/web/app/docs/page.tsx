@@ -276,6 +276,7 @@ rifft.init(
                 <CardContent className="space-y-2 text-sm text-muted-foreground">
                   <div>2M spans per month</div>
                   <div>1-year retention</div>
+                  <div>Automatic regression detection</div>
                   <div>Priority support</div>
                 </CardContent>
               </Card>

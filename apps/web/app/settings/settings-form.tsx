@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -39,6 +39,16 @@ export function SettingsForm({
     cost_threshold_usd: costThresholdUsd,
     timeout_threshold_ms: timeoutThresholdMs,
   });
+
+  useEffect(() => {
+    setFormState({
+      retention_days: retentionDays,
+      cost_threshold_usd: costThresholdUsd,
+      timeout_threshold_ms: timeoutThresholdMs,
+    });
+    setStatus(null);
+    setIsSaving(false);
+  }, [projectId, retentionDays, costThresholdUsd, timeoutThresholdMs]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();

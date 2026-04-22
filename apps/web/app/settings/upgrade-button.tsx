@@ -31,8 +31,6 @@ const PLANS = {
       "1-year retention",
       "Everything in Pro",
       "Automatic regression detection",
-      "Weekly digest reports",
-      "Cost and latency optimisation suggestions",
       "Priority support",
       "$5 per 100K spans above 2M",
     ],
