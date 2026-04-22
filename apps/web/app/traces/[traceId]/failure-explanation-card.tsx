@@ -49,35 +49,41 @@ export function FailureExplanationCard({
 
     let cancelled = false;
     const load = async () => {
-      setState({ kind: "loading" });
-      const response = await fetch(`/api/traces/${traceId}/failure-explanation`, {
-        cache: "no-store",
-      });
-      const data = (await response.json().catch(() => ({}))) as {
-        explanation?: TraceFailureExplanation | null;
-        error?: string;
-      };
+      try {
+        setState({ kind: "loading" });
+        const response = await fetch(`/api/traces/${traceId}/failure-explanation`, {
+          cache: "no-store",
+        });
+        const data = (await response.json().catch(() => ({}))) as {
+          explanation?: TraceFailureExplanation | null;
+          error?: string;
+        };
 
-      if (cancelled) {
-        return;
+        if (cancelled) {
+          return;
+        }
+
+        if (response.status === 403 && data.error === "failure_explanations_require_paid_plan") {
+          setState({ kind: "hidden" });
+          return;
+        }
+
+        if (!response.ok) {
+          setState({ kind: "error", message: getErrorMessage(data.error) });
+          return;
+        }
+
+        if (!data.explanation) {
+          setState({ kind: "hidden" });
+          return;
+        }
+
+        setState({ kind: "ready", explanation: data.explanation });
+      } catch {
+        if (!cancelled) {
+          setState({ kind: "error", message: getErrorMessage() });
+        }
       }
-
-      if (response.status === 403 && data.error === "failure_explanations_require_paid_plan") {
-        setState({ kind: "hidden" });
-        return;
-      }
-
-      if (!response.ok) {
-        setState({ kind: "error", message: getErrorMessage(data.error) });
-        return;
-      }
-
-      if (!data.explanation) {
-        setState({ kind: "hidden" });
-        return;
-      }
-
-      setState({ kind: "ready", explanation: data.explanation });
     };
 
     void load();
@@ -108,6 +114,8 @@ export function FailureExplanationCard({
 
       setState({ kind: "ready", explanation: data.explanation });
       toast.success("Failure explanation regenerated.");
+    } catch {
+      toast.error(getErrorMessage());
     } finally {
       setIsRegenerating(false);
     }

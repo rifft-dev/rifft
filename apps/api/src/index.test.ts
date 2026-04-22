@@ -1235,6 +1235,78 @@ test("POST /projects/:id/alerts/test sends an email test alert successfully", as
   }
 });
 
+test("POST /internal/traces/:traceId/alert escapes stored explanation HTML in email alerts", async () => {
+  const previousResendApiKey = process.env.RESEND_API_KEY;
+  process.env.RESEND_API_KEY = "re_test_key";
+
+  const fetchCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+    fetchCalls.push({
+      url,
+      body: JSON.parse((init?.body as string) ?? "null") as Record<string, unknown>,
+    });
+    return new Response(JSON.stringify({ id: "email-1" }), { status: 200 });
+  });
+
+  const app = createApp({
+    getAlertCandidatesForTrace: async () => ({
+      trace_id: "trace-1",
+      project_id: "project-1",
+      project_name: "Workspace <prod>",
+      owner_email: "owner@example.com",
+      started_at: "2026-04-20T00:00:00.000Z",
+      total_cost_usd: 0.0123,
+      fatal_failures: [
+        { mode: "prompt_injection", agent_id: "agent-1", explanation: "Injected <b>HTML</b>" },
+      ],
+    }),
+    getProjectAlertDeliveryTargets: async () => ({
+      slack_webhook_url: null,
+      alert_email: "owner@example.com",
+    }),
+    getStoredTraceFailureExplanation: async () => ({
+      trace_id: "trace-1",
+      project_id: "project-1",
+      summary: `<script>alert("xss")</script>`,
+      evidence: [],
+      recommended_fix: `Use <b>escaping</b> & review`,
+      confidence: "high" as const,
+      key_stats: [],
+      model: "test-model",
+      generated_at: "2026-04-20T00:00:00.000Z",
+      updated_at: "2026-04-20T00:00:00.000Z",
+    }),
+    getTrace: async () => null,
+    recordProjectAlertDelivery: async () => {},
+  });
+
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/internal/traces/trace-1/alert",
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(fetchCalls.length, 1);
+    assert.equal(fetchCalls[0]?.url, "https://api.resend.com/emails");
+
+    const html = String(fetchCalls[0]?.body.html ?? "");
+    assert.match(html, /Workspace &lt;prod&gt;/);
+    assert.match(html, /&lt;script&gt;alert\(&quot;xss&quot;\)&lt;\/script&gt;/);
+    assert.match(html, /Use &lt;b&gt;escaping&lt;\/b&gt; &amp; review/);
+    assert.doesNotMatch(html, /<script>alert\("xss"\)<\/script>/);
+    assert.doesNotMatch(html, /Use <b>escaping<\/b> & review/);
+  } finally {
+    mock.restoreAll();
+    if (previousResendApiKey === undefined) {
+      delete process.env.RESEND_API_KEY;
+    } else {
+      process.env.RESEND_API_KEY = previousResendApiKey;
+    }
+    await app.close();
+  }
+});
+
 test("POST /projects/:id/alerts/test returns 500 when the email provider is not configured", async () => {
   const previousResendApiKey = process.env.RESEND_API_KEY;
   delete process.env.RESEND_API_KEY;
@@ -1441,6 +1513,7 @@ test("GET /incident/:token returns trace and comparison for a valid token", asyn
 // ─── Regression digest tests ─────────────────────────────────────────────────
 
 const makeRegressionDeps = (overrides?: Record<string, unknown>) => ({
+  getProjectPlanKey: async () => "scale" as const,
   getAuthenticatedUser: async () => ({
     id: "owner-1",
     email: "owner@example.com",
@@ -1487,6 +1560,16 @@ const makeRegressionDeps = (overrides?: Record<string, unknown>) => ({
       historical_window_size: 30,
     },
   ],
+  getWeeklyDigestStats: async () => ({
+    spans_this_week: 120,
+    spans_last_week: 80,
+    traces_this_week: 12,
+    fatal_traces_this_week: 3,
+    top_agents: [],
+    mast_breakdown: [],
+    worst_trace_id: "trace-1",
+  }),
+  getTraceAttributeCorrelations: async () => [],
   recordProjectAlertDelivery: async () => {},
   ...overrides,
 });
@@ -1575,7 +1658,16 @@ test("POST /internal/projects/:id/regression-digest skips when regression digest
   }
 });
 
-test("POST /internal/projects/:id/regression-digest skips when no regressions are detected", async () => {
+test("POST /internal/projects/:id/regression-digest still sends the weekly digest when no regressions are detected", async () => {
+  const previousResendApiKey = process.env.RESEND_API_KEY;
+  process.env.RESEND_API_KEY = "re_test_key";
+
+  const fetchCalls: { url: string; body: unknown }[] = [];
+  mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+    fetchCalls.push({ url, body: JSON.parse(init?.body as string ?? "null") });
+    return new Response("ok", { status: 200 });
+  });
+
   const app = createApp(
     makeRegressionDeps({
       detectRegressions: async () => [],
@@ -1589,8 +1681,23 @@ test("POST /internal/projects/:id/regression-digest skips when no regressions ar
     });
 
     assert.equal(response.statusCode, 200);
-    assert.deepEqual(response.json(), { skipped: true, reason: "no_regressions" });
+    assert.deepEqual(response.json(), {
+      skipped: false,
+      regressions: 0,
+      traces: 12,
+      results: {
+        slack: "sent",
+        email: "sent",
+      },
+    });
+    assert.equal(fetchCalls.length, 2);
   } finally {
+    mock.restoreAll();
+    if (previousResendApiKey === undefined) {
+      delete process.env.RESEND_API_KEY;
+    } else {
+      process.env.RESEND_API_KEY = previousResendApiKey;
+    }
     await app.close();
   }
 });
@@ -1628,7 +1735,7 @@ test("POST /internal/projects/:id/regression-digest sends Slack digest and recor
     assert.equal(body.results.slack, "sent");
     assert.equal(fetchCalls.length, 1);
     assert.equal(fetchCalls[0].url, "https://hooks.slack.com/services/T00/B00/abcd");
-    assert.ok(JSON.stringify(fetchCalls[0].body).includes("context window overflow"));
+    assert.ok(JSON.stringify(fetchCalls[0].body).includes("Context window overflow"));
     assert.equal(deliveries.length, 1);
     assert.equal(deliveries[0].channel, "slack");
     assert.equal(deliveries[0].eventType, "regression_digest");

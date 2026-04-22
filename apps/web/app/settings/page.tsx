@@ -14,6 +14,8 @@ import { requireCloudProject } from "../lib/require-cloud-project";
 import { ApiKeyCard } from "./api-key-card";
 import { AlertsCard } from "./alerts-card";
 import { OptimizationCard } from "./optimization-card";
+import { CorrelationCard } from "./correlation-card";
+import { AgentDiffCard } from "./agent-diff-card";
 import { InviteMemberCard } from "../invite-member-card";
 import { ManageBillingButton } from "./manage-billing-button";
 import { RefreshStatusButton } from "./refresh-status-button";
@@ -206,6 +208,10 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
       {optimizationResult ? (
         <OptimizationCard result={optimizationResult} />
       ) : null}
+
+      {isPaidPlan ? <CorrelationCard projectId={project.id} /> : null}
+
+      {isPaidPlan ? <AgentDiffCard projectId={project.id} /> : null}
 
       <Card className="rounded-3xl">
         <CardHeader>

@@ -50,6 +50,8 @@ import {
   getWeeklyDigestStats,
   getScaleProjectsWithDigestEnabled,
   getOptimizationSuggestions,
+  getTraceAttributeCorrelations,
+  getAgentFailureDiff,
 } from "./queries.js";
 
 const port = Number(process.env.PORT ?? 4000);
@@ -144,6 +146,14 @@ const createStripeBillingPortalSession = async ({
 const appBaseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://app.rifft.dev";
 
 const formatUsd = (value: number) => `$${value.toFixed(4)}`;
+
+const escapeHtml = (value: string) =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 
 const maskSlackTarget = (value: string) => {
   try {
@@ -615,6 +625,7 @@ type AppDeps = {
   getAuthenticatedUser: typeof getAuthenticatedUser;
   getAccessibleProject: typeof getAccessibleProject;
   getProject: typeof getProject;
+  getTrace: typeof getTrace;
   bootstrapCloudProject: typeof bootstrapCloudProject;
   consumePendingInvites: typeof consumePendingInvites;
   createCloudWorkspaceForUser: typeof createCloudWorkspaceForUser;
@@ -629,6 +640,7 @@ type AppDeps = {
   updateProjectAlertSettings: typeof updateProjectAlertSettings;
   getProjectAlertDeliveryTargets: typeof getProjectAlertDeliveryTargets;
   recordProjectAlertDelivery: typeof recordProjectAlertDelivery;
+  getAlertCandidatesForTrace: typeof getAlertCandidatesForTrace;
   getStoredTraceFailureExplanation: typeof getStoredTraceFailureExplanation;
   upsertTraceFailureExplanation: typeof upsertTraceFailureExplanation;
   getProjectPlanKey: typeof getProjectPlanKey;
@@ -640,6 +652,8 @@ type AppDeps = {
   getWeeklyDigestStats: typeof getWeeklyDigestStats;
   getScaleProjectsWithDigestEnabled: typeof getScaleProjectsWithDigestEnabled;
   getOptimizationSuggestions: typeof getOptimizationSuggestions;
+  getTraceAttributeCorrelations: typeof getTraceAttributeCorrelations;
+  getAgentFailureDiff: typeof getAgentFailureDiff;
   pgQuery: (query: string, params?: unknown[]) => Promise<unknown>;
 };
 
@@ -651,6 +665,7 @@ export const createApp = (
     getAuthenticatedUser,
     getAccessibleProject,
     getProject,
+    getTrace,
     bootstrapCloudProject,
     consumePendingInvites,
     createCloudWorkspaceForUser,
@@ -665,6 +680,7 @@ export const createApp = (
     updateProjectAlertSettings,
     getProjectAlertDeliveryTargets,
     recordProjectAlertDelivery,
+    getAlertCandidatesForTrace,
     getStoredTraceFailureExplanation,
     upsertTraceFailureExplanation,
     getProjectPlanKey,
@@ -676,6 +692,8 @@ export const createApp = (
     getWeeklyDigestStats,
     getScaleProjectsWithDigestEnabled,
     getOptimizationSuggestions,
+    getTraceAttributeCorrelations,
+    getAgentFailureDiff,
     pgQuery: pgPool.query.bind(pgPool),
     ...deps,
   };
@@ -943,6 +961,56 @@ export const createApp = (
 
     const result = await resolvedDeps.getOptimizationSuggestions(projectId);
     return result;
+  });
+
+  // Agent failure diff — Pro+ gated. Per-agent fatal vs successful distributions.
+  app.get("/projects/:id/agent-failure-diff", async (request, reply) => {
+    const projectId = (request.params as { id: string }).id;
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
+    if (!user) {
+      reply.code(401);
+      return { error: "unauthorized" };
+    }
+
+    const accessibleProject = await resolvedDeps.getAccessibleProject(user.id, projectId);
+    if (!accessibleProject) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+
+    const planKey = await resolvedDeps.getProjectPlanKey(projectId);
+    if (planKey === "free") {
+      reply.code(403);
+      return { error: "pro_plan_required" };
+    }
+
+    const agents = await resolvedDeps.getAgentFailureDiff(projectId);
+    return { agents };
+  });
+
+  // Attribute correlation analysis — Pro+ gated (needs enough trace history)
+  app.get("/projects/:id/attribute-correlations", async (request, reply) => {
+    const projectId = (request.params as { id: string }).id;
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
+    if (!user) {
+      reply.code(401);
+      return { error: "unauthorized" };
+    }
+
+    const accessibleProject = await resolvedDeps.getAccessibleProject(user.id, projectId);
+    if (!accessibleProject) {
+      reply.code(404);
+      return { error: "not_found" };
+    }
+
+    const planKey = await resolvedDeps.getProjectPlanKey(projectId);
+    if (planKey === "free") {
+      reply.code(403);
+      return { error: "pro_plan_required" };
+    }
+
+    const findings = await resolvedDeps.getTraceAttributeCorrelations(projectId);
+    return { findings };
   });
 
   app.get("/projects/:id/alerts", async (request, reply) => {
@@ -1816,10 +1884,15 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
 
   const dispatchFatalFailureAlert = async (traceId: string) => {
     const alertWebhookUrl = process.env.ALERT_WEBHOOK_URL;
-    const candidates = await getAlertCandidatesForTrace(traceId);
+    const candidates = await resolvedDeps.getAlertCandidatesForTrace(traceId);
     if (!candidates) {
       return;
     }
+
+    // Fetch stored LLM explanation if available — non-blocking, best-effort
+    const storedExplanation = await resolvedDeps
+      .getStoredTraceFailureExplanation(traceId)
+      .catch(() => null);
 
     const payload = {
       event: "trace.fatal_failure",
@@ -1836,6 +1909,12 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
         }),
       ),
       trace_url: `${appBaseUrl}/traces/${traceId}`,
+      ...(storedExplanation
+        ? {
+            explanation_summary: storedExplanation.summary,
+            recommended_fix: storedExplanation.recommended_fix,
+          }
+        : {}),
     };
 
     if (alertWebhookUrl) {
@@ -1848,7 +1927,7 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
       });
     }
 
-    const projectTargets = await getProjectAlertDeliveryTargets(candidates.project_id);
+    const projectTargets = await resolvedDeps.getProjectAlertDeliveryTargets(candidates.project_id);
     if (!projectTargets) {
       return;
     }
@@ -1859,6 +1938,13 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
       `Started: ${new Date(payload.started_at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}`,
       `Cost: ${formatUsd(payload.total_cost_usd)}`,
       `Root cause: ${summary || "Fatal failure detected"}`,
+      ...(storedExplanation
+        ? [
+            ``,
+            `What happened: ${storedExplanation.summary}`,
+            `Recommended fix: ${storedExplanation.recommended_fix}`,
+          ]
+        : []),
     ];
 
     if (projectTargets.slack_webhook_url) {
@@ -1869,7 +1955,7 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
           bodyLines,
           actionUrl: payload.trace_url,
         });
-        await recordProjectAlertDelivery({
+        await resolvedDeps.recordProjectAlertDelivery({
           projectId: candidates.project_id,
           channel: "slack",
           eventType: "fatal_failure",
@@ -1879,7 +1965,7 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "alert_send_failed";
-        await recordProjectAlertDelivery({
+        await resolvedDeps.recordProjectAlertDelivery({
           projectId: candidates.project_id,
           channel: "slack",
           eventType: "fatal_failure",
@@ -1894,13 +1980,20 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
 
     if (projectTargets.alert_email) {
       try {
+        const escapedProjectName = escapeHtml(payload.project_name);
+        const escapedSummary = escapeHtml(summary || "A fatal failure was detected.");
+        const escapedStoredSummary = storedExplanation ? escapeHtml(storedExplanation.summary) : "";
+        const escapedRecommendedFix = storedExplanation
+          ? escapeHtml(storedExplanation.recommended_fix)
+          : "";
+
         await sendAlertEmail({
           to: projectTargets.alert_email,
           subject: `Rifft fatal failure: ${payload.project_name}`,
-          html: `<p><strong>${payload.project_name}</strong> recorded a fatal failure.</p><p>${summary || "A fatal failure was detected."}</p><p>Started: ${payload.started_at}<br />Cost: ${formatUsd(payload.total_cost_usd)}</p><p><a href="${payload.trace_url}">Open trace in Rifft</a></p>`,
-          text: `${payload.project_name} recorded a fatal failure.\n\n${summary || "A fatal failure was detected."}\n\nStarted: ${payload.started_at}\nCost: ${formatUsd(payload.total_cost_usd)}\n\nOpen trace: ${payload.trace_url}`,
+          html: `<p><strong>${escapedProjectName}</strong> recorded a fatal failure.</p><p>${escapedSummary}</p><p>Started: ${payload.started_at}<br />Cost: ${formatUsd(payload.total_cost_usd)}</p>${storedExplanation ? `<p style="border-left:3px solid #c00;padding-left:12px;margin:16px 0"><strong>What happened:</strong> ${escapedStoredSummary}</p><p style="border-left:3px solid #888;padding-left:12px;margin:16px 0"><strong>Recommended fix:</strong> ${escapedRecommendedFix}</p>` : ""}<p><a href="${payload.trace_url}">Open trace in Rifft</a></p>`,
+          text: `${payload.project_name} recorded a fatal failure.\n\n${summary || "A fatal failure was detected."}\n\nStarted: ${payload.started_at}\nCost: ${formatUsd(payload.total_cost_usd)}${storedExplanation ? `\n\nWhat happened: ${storedExplanation.summary}\n\nRecommended fix: ${storedExplanation.recommended_fix}` : ""}\n\nOpen trace: ${payload.trace_url}`,
         });
-        await recordProjectAlertDelivery({
+        await resolvedDeps.recordProjectAlertDelivery({
           projectId: candidates.project_id,
           channel: "email",
           eventType: "fatal_failure",
@@ -1910,7 +2003,7 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "alert_send_failed";
-        await recordProjectAlertDelivery({
+        await resolvedDeps.recordProjectAlertDelivery({
           projectId: candidates.project_id,
           channel: "email",
           eventType: "fatal_failure",
@@ -1951,10 +2044,11 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
       return { skipped: true, reason: "no_destination" };
     }
 
-    // Gather richer weekly stats alongside regression detection
-    const [regressions, stats] = await Promise.all([
+    // Gather richer weekly stats alongside regression detection and correlation findings
+    const [regressions, stats, correlations] = await Promise.all([
       resolvedDeps.detectRegressions(projectId),
       resolvedDeps.getWeeklyDigestStats(projectId),
+      resolvedDeps.getTraceAttributeCorrelations(projectId).catch(() => []),
     ]);
 
     // Skip only if there were zero traces this week (nothing to report)
@@ -2038,6 +2132,41 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
             .join("")
         : `<tr><td colspan="3" style="padding:12px;font-family:sans-serif;font-size:13px;color:#888">No agent spans recorded this week.</td></tr>`;
 
+    const fmtCorrelationAttr = (attr: string) =>
+      attr === "max_input_tokens"
+        ? "peak input tokens"
+        : attr === "total_cost_usd"
+        ? "total cost"
+        : "duration";
+    const fmtCorrelationThreshold = (attr: string, value: number) =>
+      attr === "total_cost_usd"
+        ? `$${value.toFixed(4)}`
+        : attr === "max_input_tokens"
+        ? value >= 1000
+          ? `${(value / 1000).toFixed(1)}k`
+          : String(Math.round(value))
+        : value >= 1000
+        ? `${(value / 1000).toFixed(1)}s`
+        : `${Math.round(value)}ms`;
+
+    const correlationRows =
+      correlations.length > 0
+        ? correlations
+            .map(
+              (c) =>
+                `<tr>
+                  <td style="padding:7px 12px;border-bottom:1px solid #eee;font-family:sans-serif;font-size:13px">
+                    ${c.fatal_traces_above} of ${c.total_traces_above} traces with ${fmtCorrelationAttr(c.attribute)} &gt; ${fmtCorrelationThreshold(c.attribute, c.threshold)} were fatal
+                    <span style="font-size:11px;color:#888"> (vs ${Math.round(c.failure_rate_below * 100)}% below)</span>
+                  </td>
+                  <td style="padding:7px 12px;border-bottom:1px solid #eee;font-family:sans-serif;font-size:13px;text-align:right;color:#c00;font-weight:600">
+                    ${Math.round(c.failure_rate_above * 100)}% fatal
+                  </td>
+                </tr>`,
+            )
+            .join("")
+        : "";
+
     const regressionRows =
       topRegressions.length > 0
         ? topRegressions
@@ -2107,6 +2236,22 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
                 <tbody>${regressionRows}</tbody>
               </table>
 
+              ${correlations.length > 0 ? `
+              <h2 style="font-family:sans-serif;font-size:15px;font-weight:600;color:#111;margin:0 0 8px">Failure patterns detected</h2>
+              <p style="font-family:sans-serif;font-size:13px;color:#666;margin:0 0 10px">
+                Attributes that strongly predict fatal traces in the last 30 days.
+              </p>
+              <table style="width:100%;border-collapse:collapse;margin-bottom:28px">
+                <thead>
+                  <tr style="background:#f5f5f5">
+                    <th style="padding:7px 12px;text-align:left;font-family:sans-serif;font-size:12px;color:#555;font-weight:600">Pattern</th>
+                    <th style="padding:7px 12px;text-align:right;font-family:sans-serif;font-size:12px;color:#555;font-weight:600">Fatal rate</th>
+                  </tr>
+                </thead>
+                <tbody>${correlationRows}</tbody>
+              </table>
+              ` : ""}
+
               <table style="margin-bottom:32px" cellpadding="0" cellspacing="0">
                 <tr>
                   <td style="background:#111;border-radius:6px">
@@ -2159,6 +2304,16 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
             "",
           ]
         : ["No regressions detected this week.", ""]),
+      ...(correlations.length > 0
+        ? [
+            "Failure patterns:",
+            ...correlations.map(
+              (c) =>
+                `  ${c.fatal_traces_above} of ${c.total_traces_above} traces with ${fmtCorrelationAttr(c.attribute)} > ${fmtCorrelationThreshold(c.attribute, c.threshold)} were fatal (vs ${Math.round(c.failure_rate_below * 100)}% below threshold)`,
+            ),
+            "",
+          ]
+        : []),
       ctaUrl,
     ].join("\n");
 
@@ -2179,6 +2334,16 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
             }),
           ]
         : ["No regressions detected — failure rates are stable."]),
+      ...(correlations.length > 0
+        ? [
+            "",
+            "*Failure patterns:*",
+            ...correlations.map(
+              (c) =>
+                `📊 ${c.fatal_traces_above}/${c.total_traces_above} traces with ${fmtCorrelationAttr(c.attribute)} > ${fmtCorrelationThreshold(c.attribute, c.threshold)} were fatal (${Math.round(c.failure_rate_above * 100)}% vs ${Math.round(c.failure_rate_below * 100)}% below)`,
+            ),
+          ]
+        : []),
     ];
 
     // ── Dispatch ───────────────────────────────────────────────────────────────
@@ -2258,12 +2423,12 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
       return;
     }
 
-    const trace = await getTrace(traceId);
+    const trace = await resolvedDeps.getTrace(traceId);
     if (!trace) {
       return;
     }
 
-    const project = await getProject(trace.project_id);
+    const project = await resolvedDeps.getProject(trace.project_id);
     if (!project) {
       return;
     }

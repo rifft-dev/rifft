@@ -3853,3 +3853,350 @@ export const getIncidentShareByToken = async (
     created_at: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
   };
 };
+
+// ── Agent Failure Diff ────────────────────────────────────────────────────────
+// For every agent in a project that has at least 3 fatal and 3 successful trace
+// activations in the last 30 days, computes the median and p90 of key numeric
+// attributes (input tokens, duration) across both populations. Returns agents
+// sorted by how much their input token median diverges between populations.
+
+const percentile = (sorted: number[], p: number): number => {
+  if (sorted.length === 0) return 0;
+  const idx = Math.max(0, Math.ceil(sorted.length * p) - 1);
+  return sorted[idx] ?? 0;
+};
+
+export type AgentFailureDiffResult = {
+  agent_id: string;
+  fatal_activations: number;
+  successful_activations: number;
+  input_tokens: {
+    fatal_median: number;
+    fatal_p90: number;
+    success_median: number;
+    success_p90: number;
+    divergence_ratio: number; // fatal_median / success_median, or 0 if success_median === 0
+  } | null;
+  duration_ms: {
+    fatal_median: number;
+    fatal_p90: number;
+    success_median: number;
+    success_p90: number;
+  } | null;
+};
+
+export const getAgentFailureDiff = async (
+  projectId: string,
+  lookbackDays = 30,
+): Promise<AgentFailureDiffResult[]> => {
+  const cutoff = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+  const fmtDateTime = (d: Date) => d.toISOString().slice(0, 19).replace("T", " ");
+
+  // Step 1: trace outcomes from Postgres
+  const tracesResult = await pgPool.query<{ trace_id: string; mast_failures: unknown }>(
+    `SELECT trace_id, mast_failures
+     FROM traces
+     WHERE project_id = $1 AND started_at >= $2
+     ORDER BY started_at DESC
+     LIMIT 500`,
+    [projectId, cutoff.toISOString()],
+  );
+
+  const traces = tracesResult.rows;
+  if (traces.length < 6) return [];
+
+  const isFatalMap = new Map<string, boolean>();
+  for (const t of traces) {
+    const failures = Array.isArray(t.mast_failures) ? t.mast_failures : [];
+    isFatalMap.set(
+      t.trace_id,
+      failures.some((f: unknown) => (f as { severity?: string }).severity === "fatal"),
+    );
+  }
+
+  const fatalTotal = [...isFatalMap.values()].filter(Boolean).length;
+  if (fatalTotal < 3) return [];
+
+  // Step 2: per-trace-per-agent aggregates from ClickHouse
+  const traceIds = traces.map((t) => t.trace_id);
+  const inClause = traceIds.map((id) => `'${escapeValue(id)}'`).join(", ");
+
+  type ChRow = {
+    trace_id: string;
+    agent_id: string;
+    max_input_tokens: string;
+    total_duration_ms: string;
+  };
+
+  const chRows = await queryClickHouse<ChRow>(
+    `
+    SELECT
+      trace_id,
+      agent_id,
+      MAX(
+        simpleJSONExtractUInt(attributes, 'llm.input_tokens') +
+        simpleJSONExtractUInt(attributes, 'prompt_tokens')    +
+        simpleJSONExtractUInt(attributes, 'input_tokens')
+      ) AS max_input_tokens,
+      SUM(toFloat64(duration_ms)) AS total_duration_ms
+    FROM rifft.spans
+    WHERE trace_id IN (${inClause})
+      AND agent_id != ''
+      AND start_time >= toDateTime('${fmtDateTime(cutoff)}')
+    GROUP BY trace_id, agent_id
+    `,
+  ).catch(() => [] as ChRow[]);
+
+  if (chRows.length === 0) return [];
+
+  // Step 3: group by agent_id, split into fatal/successful populations
+  type AgentTrace = { is_fatal: boolean; max_input_tokens: number; total_duration_ms: number };
+  const byAgent = new Map<string, AgentTrace[]>();
+
+  for (const row of chRows) {
+    if (!isFatalMap.has(row.trace_id)) continue;
+    const entry: AgentTrace = {
+      is_fatal: isFatalMap.get(row.trace_id) ?? false,
+      max_input_tokens: Number(row.max_input_tokens) || 0,
+      total_duration_ms: Number(row.total_duration_ms) || 0,
+    };
+    const list = byAgent.get(row.agent_id) ?? [];
+    list.push(entry);
+    byAgent.set(row.agent_id, list);
+  }
+
+  // Step 4: compute stats per agent
+  const results: AgentFailureDiffResult[] = [];
+
+  for (const [agent_id, activations] of byAgent) {
+    const fatal = activations.filter((a) => a.is_fatal);
+    const success = activations.filter((a) => !a.is_fatal);
+
+    if (fatal.length < 3 || success.length < 3) continue;
+
+    // Input tokens stats (only include if any values are non-zero)
+    const fatalTokens = fatal.map((a) => a.max_input_tokens).filter((v) => v > 0).sort((a, b) => a - b);
+    const successTokens = success.map((a) => a.max_input_tokens).filter((v) => v > 0).sort((a, b) => a - b);
+
+    let inputTokenStats: AgentFailureDiffResult["input_tokens"] = null;
+    if (fatalTokens.length >= 2 && successTokens.length >= 2) {
+      const fatalMedian = median(fatalTokens) ?? 0;
+      const successMedian = median(successTokens) ?? 0;
+      inputTokenStats = {
+        fatal_median: fatalMedian,
+        fatal_p90: percentile(fatalTokens, 0.9),
+        success_median: successMedian,
+        success_p90: percentile(successTokens, 0.9),
+        divergence_ratio: successMedian > 0 ? fatalMedian / successMedian : 0,
+      };
+    }
+
+    // Duration stats
+    const fatalDur = fatal.map((a) => a.total_duration_ms).filter((v) => v > 0).sort((a, b) => a - b);
+    const successDur = success.map((a) => a.total_duration_ms).filter((v) => v > 0).sort((a, b) => a - b);
+
+    let durationStats: AgentFailureDiffResult["duration_ms"] = null;
+    if (fatalDur.length >= 2 && successDur.length >= 2) {
+      durationStats = {
+        fatal_median: median(fatalDur) ?? 0,
+        fatal_p90: percentile(fatalDur, 0.9),
+        success_median: median(successDur) ?? 0,
+        success_p90: percentile(successDur, 0.9),
+      };
+    }
+
+    if (!inputTokenStats && !durationStats) continue;
+
+    results.push({
+      agent_id,
+      fatal_activations: fatal.length,
+      successful_activations: success.length,
+      input_tokens: inputTokenStats,
+      duration_ms: durationStats,
+    });
+  }
+
+  // Sort by input token divergence ratio descending (most divergent first)
+  return results.sort(
+    (a, b) => (b.input_tokens?.divergence_ratio ?? 0) - (a.input_tokens?.divergence_ratio ?? 0),
+  );
+};
+
+// ── Attribute Correlation Analysis ────────────────────────────────────────────
+// For a project, finds which numeric span attributes (peak input tokens, trace
+// cost, total duration) best discriminate fatal traces from successful ones.
+// Returns up to 3 findings — only those where the failure rate gap is ≥15pp
+// and the above-threshold rate is at least 2× the below-threshold rate.
+
+export type AttributeCorrelationFinding = {
+  attribute: "max_input_tokens" | "total_cost_usd" | "total_duration_ms";
+  label: string;
+  threshold: number;
+  unit: string;
+  failure_rate_above: number; // 0–1
+  failure_rate_below: number; // 0–1
+  fatal_traces_above: number;
+  total_traces_above: number;
+  fatal_traces_total: number;
+  total_traces: number;
+};
+
+export const getTraceAttributeCorrelations = async (
+  projectId: string,
+  lookbackDays = 30,
+): Promise<AttributeCorrelationFinding[]> => {
+  const cutoff = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+  const fmtDateTime = (d: Date) => d.toISOString().slice(0, 19).replace("T", " ");
+
+  // Step 1: recent traces with their MAST outcome from Postgres
+  const tracesResult = await pgPool.query<{
+    trace_id: string;
+    mast_failures: unknown;
+  }>(
+    `SELECT trace_id, mast_failures
+     FROM traces
+     WHERE project_id = $1
+       AND started_at >= $2
+     ORDER BY started_at DESC
+     LIMIT 500`,
+    [projectId, cutoff.toISOString()],
+  );
+
+  const traces = tracesResult.rows;
+  if (traces.length < 10) return [];
+
+  const isFatalMap = new Map<string, boolean>();
+  for (const t of traces) {
+    const failures = Array.isArray(t.mast_failures) ? t.mast_failures : [];
+    isFatalMap.set(
+      t.trace_id,
+      failures.some((f: unknown) => (f as { severity?: string }).severity === "fatal"),
+    );
+  }
+
+  const fatalTotal = [...isFatalMap.values()].filter(Boolean).length;
+  if (fatalTotal === 0) return []; // nothing to correlate against
+
+  // Step 2: per-trace aggregated attributes from ClickHouse
+  const traceIds = traces.map((t) => t.trace_id);
+  const inClause = traceIds.map((id) => `'${escapeValue(id)}'`).join(", ");
+
+  type ChRow = {
+    trace_id: string;
+    max_input_tokens: string;
+    total_cost_usd: string;
+    total_duration_ms: string;
+  };
+
+  const chRows = await queryClickHouse<ChRow>(
+    `
+    SELECT
+      trace_id,
+      MAX(
+        simpleJSONExtractUInt(attributes, 'llm.input_tokens') +
+        simpleJSONExtractUInt(attributes, 'prompt_tokens')    +
+        simpleJSONExtractUInt(attributes, 'input_tokens')
+      ) AS max_input_tokens,
+      SUM(
+        simpleJSONExtractFloat(attributes, 'cost_usd') +
+        simpleJSONExtractFloat(attributes, 'llm.cost_usd')
+      ) AS total_cost_usd,
+      SUM(toFloat64(duration_ms)) AS total_duration_ms
+    FROM rifft.spans
+    WHERE trace_id IN (${inClause})
+      AND start_time >= toDateTime('${fmtDateTime(cutoff)}')
+    GROUP BY trace_id
+    `,
+  ).catch(() => [] as ChRow[]);
+
+  if (chRows.length < 10) return [];
+
+  // Step 3: merge Postgres outcomes with ClickHouse attributes
+  type TraceRow = {
+    trace_id: string;
+    is_fatal: boolean;
+    max_input_tokens: number;
+    total_cost_usd: number;
+    total_duration_ms: number;
+  };
+
+  const merged: TraceRow[] = chRows
+    .filter((r) => isFatalMap.has(r.trace_id))
+    .map((r) => ({
+      trace_id: r.trace_id,
+      is_fatal: isFatalMap.get(r.trace_id) ?? false,
+      max_input_tokens: Number(r.max_input_tokens) || 0,
+      total_cost_usd: Number(r.total_cost_usd) || 0,
+      total_duration_ms: Number(r.total_duration_ms) || 0,
+    }));
+
+  if (merged.length < 10) return [];
+
+  // Step 4: for each attribute, try p50/p75/p90 thresholds and keep the
+  // one with the largest fatal-rate gap that clears both minimum bars.
+  const configs: Array<{
+    key: keyof Pick<TraceRow, "max_input_tokens" | "total_cost_usd" | "total_duration_ms">;
+    label: string;
+    unit: string;
+  }> = [
+    { key: "max_input_tokens", label: "Peak input tokens per span", unit: "tokens" },
+    { key: "total_cost_usd", label: "Trace cost", unit: "USD" },
+    { key: "total_duration_ms", label: "Total trace duration", unit: "ms" },
+  ];
+
+  const findings: AttributeCorrelationFinding[] = [];
+
+  for (const config of configs) {
+    const values = merged
+      .map((r) => r[config.key])
+      .sort((a, b) => a - b);
+
+    if (values.length < 10) continue;
+
+    const candidates = [0.5, 0.75, 0.9].map(
+      (p) => values[Math.floor(values.length * p)] ?? 0,
+    );
+
+    let best: AttributeCorrelationFinding | null = null;
+    let bestGap = 0;
+
+    for (const threshold of candidates) {
+      if (threshold === 0) continue;
+
+      const above = merged.filter((r) => r[config.key] > threshold);
+      const below = merged.filter((r) => r[config.key] <= threshold);
+
+      if (above.length < 3 || below.length < 3) continue;
+
+      const rateAbove = above.filter((r) => r.is_fatal).length / above.length;
+      const rateBelow = below.filter((r) => r.is_fatal).length / below.length;
+      const gap = rateAbove - rateBelow;
+
+      if (gap > bestGap && gap >= 0.15 && rateAbove >= Math.max(rateBelow * 2, 0.1)) {
+        bestGap = gap;
+        best = {
+          attribute: config.key,
+          label: config.label,
+          threshold,
+          unit: config.unit,
+          failure_rate_above: rateAbove,
+          failure_rate_below: rateBelow,
+          fatal_traces_above: above.filter((r) => r.is_fatal).length,
+          total_traces_above: above.length,
+          fatal_traces_total: fatalTotal,
+          total_traces: merged.length,
+        };
+      }
+    }
+
+    if (best) findings.push(best);
+  }
+
+  // Sort by discriminating power (biggest gap first), return top 3
+  return findings
+    .sort(
+      (a, b) =>
+        b.failure_rate_above - b.failure_rate_below - (a.failure_rate_above - a.failure_rate_below),
+    )
+    .slice(0, 3);
+};

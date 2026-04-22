@@ -232,6 +232,25 @@ export type TraceFailureExplanation = {
   updated_at: string;
 };
 
+export type AgentFailureDiffResult = {
+  agent_id: string;
+  fatal_activations: number;
+  successful_activations: number;
+  input_tokens: {
+    fatal_median: number;
+    fatal_p90: number;
+    success_median: number;
+    success_p90: number;
+    divergence_ratio: number;
+  } | null;
+  duration_ms: {
+    fatal_median: number;
+    fatal_p90: number;
+    success_median: number;
+    success_p90: number;
+  } | null;
+};
+
 export type TraceLiveSnapshot = {
   trace: TraceDetail;
   graph: TraceGraph;

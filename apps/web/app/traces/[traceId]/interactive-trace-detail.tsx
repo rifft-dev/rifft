@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, CircleAlert, GitBranch, Loader2, Play, RadioTower, ShieldAlert } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleAlert, Copy, GitBranch, Loader2, Play, RadioTower, ShieldAlert } from "lucide-react";
 import {
   Background,
   Controls,
@@ -44,11 +44,12 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { saveForkDraft as persistForkDraft } from "../../lib/client-api";
 import { formatCurrency } from "@/lib/utils";
-import type { AgentDetail, ForkDraft, TraceDetail, TraceGraph, TraceLiveSnapshot, TraceTimeline } from "../../lib/api-types";
+import type { AgentDetail, AgentFailureDiffResult, ForkDraft, TraceDetail, TraceGraph, TraceLiveSnapshot, TraceTimeline } from "../../lib/api-types";
 import { FailureExplanationCard } from "./failure-explanation-card";
 
 type AgentRecord = {
@@ -95,6 +96,35 @@ const formatJsonPreview = (value: unknown) => {
   }
 
   return `${formatted.slice(0, MAX_JSON_PREVIEW_CHARS)}\n\n… truncated for preview`;
+};
+
+const buildFallbackAgentDetail = (
+  trace: TraceDetail,
+  graph: TraceGraph,
+  agentId: string,
+): AgentDetail => {
+  const node = graph.nodes.find((candidate) => candidate.id === agentId);
+  const framework = node?.framework ?? trace.framework[0] ?? "unknown";
+  const status = node?.status ?? "unset";
+  const totalCostUsd = node?.cost_usd ?? 0;
+  const totalDurationMs = node?.duration_ms ?? 0;
+
+  return {
+    summary: {
+      agent_id: agentId,
+      framework,
+      status,
+      total_cost_usd: totalCostUsd,
+      total_duration_ms: totalDurationMs,
+    },
+    messages: [],
+    tool_calls: [],
+    mast_failures: trace.mast_failures.filter((failure) => failure.agent_id === agentId),
+    decision_context: {
+      unavailable: true,
+      reason: "agent_detail_unavailable",
+    },
+  };
 };
 
 const statusVariant = (status: string) => {
@@ -240,6 +270,7 @@ export function InteractiveTraceDetail({
   const [trace, setTrace] = useState<TraceDetail>(initialTrace);
   const [graph, setGraph] = useState<TraceGraph>(initialGraph);
   const [timeline, setTimeline] = useState<TraceTimeline>(initialTimeline);
+  const [agentRecords, setAgentRecords] = useState<AgentRecord[]>(agentDetails);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(initialGraph.nodes[0]?.id ?? null);
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"graph" | "timeline">("graph");
@@ -251,6 +282,9 @@ export function InteractiveTraceDetail({
   const [replayIndex, setReplayIndex] = useState(0);
   const [forkDrafts, setForkDrafts] = useState<ForkDraft[]>(initialForkDrafts);
 const [forkSaved, setForkSaved] = useState(false);
+  const [forkOriginalPayload, setForkOriginalPayload] = useState("");
+  const [tokenLimitInput, setTokenLimitInput] = useState("");
+  const [modelOverrideInput, setModelOverrideInput] = useState("");
   const [liveState, setLiveState] = useState<LiveState>({
     isLive: initialTrace.status === "unset",
     lastActivityAt: initialTrace.updated_at,
@@ -258,10 +292,12 @@ const [forkSaved, setForkSaved] = useState(false);
     sessionExpired: false,
   });
   const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
+  const [agentDiffByAgent, setAgentDiffByAgent] = useState<Map<string, AgentFailureDiffResult>>(new Map());
   const overlayOpenedFromSheet = useRef(false);
+  const overlaySourceAgentId = useRef<string | null>(null);
   const previousFailureCountRef = useRef(initialTrace.mast_failures.length);
 
-  const agentById = useMemo(() => new Map(agentDetails.map((item) => [item.agentId, item.detail])), [agentDetails]);
+  const agentById = useMemo(() => new Map(agentRecords.map((item) => [item.agentId, item.detail])), [agentRecords]);
   const selectedAgent = selectedAgentId ? agentById.get(selectedAgentId) ?? null : null;
   const selectedMessage = selectedSpanId
     ? trace.communication_spans.find((span) => span.span_id === selectedSpanId) ?? null
@@ -375,6 +411,57 @@ const [forkSaved, setForkSaved] = useState(false);
 
     setReplayIndex(0);
   }, [replaySpans.length]);
+
+  useEffect(() => {
+    setAgentRecords((current) => {
+      const currentById = new Map(current.map((item) => [item.agentId, item.detail]));
+      return graph.nodes.map((node) => {
+        const existing = currentById.get(node.id);
+        if (!existing) {
+          return {
+            agentId: node.id,
+            detail: buildFallbackAgentDetail(trace, graph, node.id),
+          };
+        }
+
+        return {
+          agentId: node.id,
+          detail: {
+            ...existing,
+            summary: {
+              ...existing.summary,
+              agent_id: node.id,
+              framework: node.framework,
+              status: node.status,
+              total_cost_usd: node.cost_usd,
+              total_duration_ms: node.duration_ms,
+            },
+            mast_failures: trace.mast_failures.filter((failure) => failure.agent_id === node.id),
+          },
+        };
+      });
+    });
+  }, [graph, trace]);
+
+  // Load agent failure diff data once on mount. Stored as a Map keyed by agent_id
+  // so the agent detail sheet can look it up instantly when opened.
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await fetch(
+          `/api/projects/${trace.project_id}/agent-failure-diff`,
+          { cache: "no-store" },
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { agents?: AgentFailureDiffResult[] };
+        if (!data.agents) return;
+        setAgentDiffByAgent(new Map(data.agents.map((a) => [a.agent_id, a])));
+      } catch {
+        // non-critical — agent history tab simply won't appear
+      }
+    };
+    void load();
+  }, [trace.project_id]);
   const replayProgressLabel =
     replaySpans.length > 0 ? `${Math.min(replayIndex + 1, replaySpans.length)} of ${replaySpans.length}` : "No replay path";
   const activeReplayIds = new Set(
@@ -439,10 +526,12 @@ const [forkSaved, setForkSaved] = useState(false);
     setSelectedAgentId(agentId);
     setSheetOpen(true);
     overlayOpenedFromSheet.current = false;
+    overlaySourceAgentId.current = null;
   };
 
   const openMessageOverlay = (spanId: string, targetAgentId?: string) => {
     setSelectedSpanId(spanId);
+    overlaySourceAgentId.current = sheetOpen ? selectedAgentId : null;
     if (targetAgentId) {
       setSelectedAgentId(targetAgentId);
     }
@@ -450,37 +539,160 @@ const [forkSaved, setForkSaved] = useState(false);
     setMessageOverlayOpen(true);
   };
 
+  // Detect numeric attributes from a parsed payload that the user can override.
+  const detectPayloadParams = (payload: unknown): { estimatedTokens: number | null; model: string | null } => {
+    if (!payload || typeof payload !== "object") return { estimatedTokens: null, model: null };
+    const obj = payload as Record<string, unknown>;
+
+    // Estimate tokens from content/input/text fields (1 token ≈ 4 chars)
+    let textLength = 0;
+    const textFields = ["content", "input", "text", "prompt", "query"];
+    for (const field of textFields) {
+      const val = obj[field];
+      if (typeof val === "string") textLength += val.length;
+      if (Array.isArray(val)) {
+        for (const item of val) {
+          if (typeof item === "string") textLength += item.length;
+          if (item && typeof item === "object") {
+            const content = (item as Record<string, unknown>).content;
+            if (typeof content === "string") textLength += content.length;
+          }
+        }
+      }
+    }
+
+    const model =
+      typeof obj.model === "string" ? obj.model :
+      typeof obj.model_id === "string" ? obj.model_id : null;
+
+    return {
+      estimatedTokens: textLength > 0 ? Math.round(textLength / 4) : null,
+      model,
+    };
+  };
+
+  // Apply token limit and/or model override to a payload object.
+  // Token limit truncates string content fields at approx chars (tokens * 4).
+  const applyPayloadOverrides = (
+    payload: unknown,
+    tokenLimit: number | null,
+    modelOverride: string,
+  ): unknown => {
+    if (!payload || typeof payload !== "object") return payload;
+    const result = { ...(payload as Record<string, unknown>) };
+
+    if (modelOverride.trim()) {
+      if ("model" in result) result.model = modelOverride.trim();
+      if ("model_id" in result) result.model_id = modelOverride.trim();
+    }
+
+    if (tokenLimit !== null && tokenLimit > 0) {
+      const charLimit = tokenLimit * 4;
+      const truncateStr = (s: string) =>
+        s.length > charLimit ? `${s.slice(0, charLimit)}… [truncated to ~${tokenLimit} tokens by Rifft override]` : s;
+
+      const textFields = ["content", "input", "text", "prompt", "query"];
+      for (const field of textFields) {
+        const val = result[field];
+        if (typeof val === "string") {
+          result[field] = truncateStr(val);
+        } else if (Array.isArray(val)) {
+          result[field] = val.map((item) => {
+            if (typeof item === "string") return truncateStr(item);
+            if (item && typeof item === "object") {
+              const msg = item as Record<string, unknown>;
+              if (typeof msg.content === "string") return { ...msg, content: truncateStr(msg.content) };
+            }
+            return item;
+          });
+        }
+      }
+    }
+
+    return result;
+  };
+
+  // Simple line-level diff: returns segments tagged added/removed/unchanged.
+  const computeLineDiff = (original: string, modified: string) => {
+    if (original === modified) return null;
+    const origLines = original.split("\n");
+    const modLines = modified.split("\n");
+    const maxLen = Math.max(origLines.length, modLines.length);
+    const segments: Array<{ type: "unchanged" | "removed" | "added"; line: string }> = [];
+    for (let i = 0; i < maxLen; i++) {
+      const o = origLines[i];
+      const m = modLines[i];
+      if (o === m) {
+        if (o !== undefined) segments.push({ type: "unchanged", line: o });
+      } else {
+        if (o !== undefined) segments.push({ type: "removed", line: o });
+        if (m !== undefined) segments.push({ type: "added", line: m });
+      }
+    }
+    return segments;
+  };
+
   const openForkDialog = () => {
     if (!selectedMessage) return;
-    setForkPayload(JSON.stringify(selectedDraft?.payload ?? selectedMessage.message ?? null, null, 2));
+    const raw = JSON.stringify(selectedDraft?.payload ?? selectedMessage.message ?? null, null, 2);
+    setForkPayload(raw);
+    setForkOriginalPayload(raw);
+    setForkSaved(false);
+    setTokenLimitInput("");
+    setModelOverrideInput("");
     setForkOpen(true);
   };
 
   const saveFork = async () => {
-  if (!selectedMessage || !parsedForkPayload.valid) return;
+    if (!selectedMessage || !parsedForkPayload.valid) return;
 
-  try {
-    const draft = await persistForkDraft(
-      trace.trace_id,
-      selectedMessage.span_id,
-      parsedForkPayload.value,
-    );
-    setForkDrafts((current) => [draft, ...current.filter((item) => item.span_id !== draft.span_id)]);
-    setForkSaved(true);
-    toast.success("Fork draft saved");
-  } catch {
-    toast.error("Fork draft must be valid JSON");
-  }
-};
+    try {
+      const draft = await persistForkDraft(
+        trace.trace_id,
+        selectedMessage.span_id,
+        parsedForkPayload.value,
+      );
+      setForkDrafts((current) => [draft, ...current.filter((item) => item.span_id !== draft.span_id)]);
+      setForkSaved(true);
+      toast.success("Fork draft saved");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message.includes("400")) {
+        toast.error("Fork draft must be valid JSON");
+      } else if (message.includes("401")) {
+        toast.error("Your session expired. Refresh the page and try again.");
+      } else {
+        toast.error("Rifft could not save this draft right now.");
+      }
+    }
+  };
+
+  const selectReplaySpanAt = (index: number) => {
+    const next = Math.max(0, Math.min(index, replaySpans.length - 1));
+    const span = replaySpans[next];
+    if (!span) return;
+
+    setReplayIndex(next);
+    setSelectedSpanId(span.span_id);
+    setSelectedAgentId(span.target_agent_id);
+  };
+
+  const enterReplayMode = () => {
+    if (replaySpans.length === 0) return;
+
+    const selectedIndex = selectedSpanId
+      ? replaySpans.findIndex((span) => span.span_id === selectedSpanId)
+      : -1;
+
+    setReplayMode(true);
+    setActiveTab("graph");
+    selectReplaySpanAt(selectedIndex >= 0 ? selectedIndex : 0);
+  };
 
   const stepReplay = (direction: -1 | 1) => {
     if (replaySpans.length === 0) return;
 
-    const next = Math.max(0, Math.min(replayIndex + direction, replaySpans.length - 1));
-    const span = replaySpans[next];
-    setReplayIndex(next);
-    setSelectedSpanId(span.span_id);
-    setSelectedAgentId(span.target_agent_id);
+    selectReplaySpanAt(replayIndex + direction);
   };
 
   return (
@@ -512,8 +724,7 @@ const [forkSaved, setForkSaved] = useState(false);
                 className={`rounded-2xl transition-colors ${trace.communication_spans.length > 0 ? "cursor-pointer hover:border-primary/40 hover:bg-muted/30" : ""}`}
                 onClick={() => {
                   if (trace.communication_spans.length > 0) {
-                    setReplayMode(true);
-                    setActiveTab("graph");
+                    enterReplayMode();
                   }
                 }}
               >
@@ -675,7 +886,7 @@ const [forkSaved, setForkSaved] = useState(false);
                           </Button>
                         </>
                       ) : (
-                        <Button onClick={() => setReplayMode(true)}>
+                        <Button onClick={enterReplayMode}>
                           <Play className="h-4 w-4" />
                           Step through handoffs
                         </Button>
@@ -973,7 +1184,11 @@ const [forkSaved, setForkSaved] = useState(false);
                   </Badge>
                 ) : null}
               </div>
-              <Tabs defaultValue="messages" className="flex min-h-0 flex-1 flex-col">
+              <Tabs
+                key={selectedAgent.summary.agent_id}
+                defaultValue="messages"
+                className="flex min-h-0 flex-1 flex-col"
+              >
                 <TabsList className="mx-6 mt-4 w-auto justify-start rounded-xl">
                   <TabsTrigger value="messages">
                     Messages
@@ -1001,6 +1216,9 @@ const [forkSaved, setForkSaved] = useState(false);
                   </TabsTrigger>
                   {selectedAgent.decision_context ? (
                     <TabsTrigger value="context">Context</TabsTrigger>
+                  ) : null}
+                  {agentDiffByAgent.has(selectedAgent.summary.agent_id) ? (
+                    <TabsTrigger value="history">History</TabsTrigger>
                   ) : null}
                 </TabsList>
                 <ScrollArea className="flex-1">
@@ -1075,6 +1293,70 @@ const [forkSaved, setForkSaved] = useState(false);
                       </pre>
                     </TabsContent>
                   ) : null}
+                  {(() => {
+                    const diff = agentDiffByAgent.get(selectedAgent.summary.agent_id);
+                    if (!diff) return null;
+                    const fmtTokens = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+                    const fmtMs = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}s` : `${Math.round(n)}ms`;
+                    const total = diff.fatal_activations + diff.successful_activations;
+                    const fatalPct = Math.round((diff.fatal_activations / total) * 100);
+                    return (
+                      <TabsContent value="history" className="mt-0 px-6 py-4 space-y-4">
+                        <div className="rounded-xl border bg-muted/20 px-4 py-3 space-y-1">
+                          <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">30-day activations</div>
+                          <div className="flex items-center gap-3 mt-2">
+                            <div className="text-xl font-mono font-semibold">{total}</div>
+                            <div className="text-sm text-muted-foreground">
+                              <span className="text-destructive font-medium">{diff.fatal_activations} fatal</span>
+                              {" "}({fatalPct}%){" · "}
+                              <span className="text-emerald-500 font-medium">{diff.successful_activations} successful</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {diff.input_tokens ? (
+                          <div className="space-y-2">
+                            <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">Peak input tokens</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 space-y-1">
+                                <div className="text-[10px] uppercase tracking-[0.14em] text-destructive/70">Fatal runs</div>
+                                <div className="font-mono text-lg font-semibold text-destructive">{fmtTokens(diff.input_tokens.fatal_median)}</div>
+                                <div className="text-[10px] text-muted-foreground">median · p90 {fmtTokens(diff.input_tokens.fatal_p90)}</div>
+                              </div>
+                              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-1">
+                                <div className="text-[10px] uppercase tracking-[0.14em] text-emerald-600 dark:text-emerald-400">Successful runs</div>
+                                <div className="font-mono text-lg font-semibold text-emerald-600 dark:text-emerald-400">{fmtTokens(diff.input_tokens.success_median)}</div>
+                                <div className="text-[10px] text-muted-foreground">median · p90 {fmtTokens(diff.input_tokens.success_p90)}</div>
+                              </div>
+                            </div>
+                            {diff.input_tokens.divergence_ratio >= 1.5 ? (
+                              <p className="text-xs text-muted-foreground">
+                                Fatal runs arrive with <span className="font-medium text-foreground">{diff.input_tokens.divergence_ratio.toFixed(1)}×</span> more input tokens than successful ones.
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {diff.duration_ms ? (
+                          <div className="space-y-2">
+                            <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">Total duration</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 space-y-1">
+                                <div className="text-[10px] uppercase tracking-[0.14em] text-destructive/70">Fatal runs</div>
+                                <div className="font-mono text-lg font-semibold text-destructive">{fmtMs(diff.duration_ms.fatal_median)}</div>
+                                <div className="text-[10px] text-muted-foreground">median · p90 {fmtMs(diff.duration_ms.fatal_p90)}</div>
+                              </div>
+                              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-1">
+                                <div className="text-[10px] uppercase tracking-[0.14em] text-emerald-600 dark:text-emerald-400">Successful runs</div>
+                                <div className="font-mono text-lg font-semibold text-emerald-600 dark:text-emerald-400">{fmtMs(diff.duration_ms.success_median)}</div>
+                                <div className="text-[10px] text-muted-foreground">median · p90 {fmtMs(diff.duration_ms.success_p90)}</div>
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
+                      </TabsContent>
+                    );
+                  })()}
                 </ScrollArea>
               </Tabs>
             </>
@@ -1082,15 +1364,102 @@ const [forkSaved, setForkSaved] = useState(false);
         </SheetContent>
       </Sheet>
 
-      <Dialog open={forkOpen} onOpenChange={(open) => { setForkOpen(open); if (!open) setForkSaved(false); }}>
-        <DialogContent className="sm:max-w-2xl">
+      <Dialog open={forkOpen} onOpenChange={(open) => { setForkOpen(open); if (!open) { setForkSaved(false); setForkOriginalPayload(""); setTokenLimitInput(""); setModelOverrideInput(""); } }}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Save fork draft</DialogTitle>
             <DialogDescription>
-              Edit the latest message payload and save a draft at this handoff point.
+              Override parameters and save a modified payload at this handoff point.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
+            {/* Parameter overrides panel */}
+            {(() => {
+              const detected = parsedForkPayload.valid ? detectPayloadParams(parsedForkPayload.value) : { estimatedTokens: null, model: null };
+              const hasOverridableParams = detected.estimatedTokens !== null || detected.model !== null;
+              if (!hasOverridableParams) return null;
+              return (
+                <div className="rounded-xl border bg-muted/20 px-4 py-3 space-y-3">
+                  <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">Parameter overrides</div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {detected.estimatedTokens !== null ? (
+                      <div className="space-y-1.5">
+                        <label className="text-xs text-muted-foreground">
+                          Truncate to tokens
+                          <span className="ml-1 text-muted-foreground/60">(est. {detected.estimatedTokens.toLocaleString()} now)</span>
+                        </label>
+                        <Input
+                          type="number"
+                          placeholder={String(detected.estimatedTokens)}
+                          value={tokenLimitInput}
+                          onChange={(e) => setTokenLimitInput(e.target.value)}
+                          className="h-8 text-xs font-mono"
+                        />
+                      </div>
+                    ) : null}
+                    {detected.model !== null ? (
+                      <div className="space-y-1.5">
+                        <label className="text-xs text-muted-foreground">Swap model</label>
+                        <Input
+                          placeholder={detected.model}
+                          value={modelOverrideInput}
+                          onChange={(e) => setModelOverrideInput(e.target.value)}
+                          className="h-8 text-xs font-mono"
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    disabled={!tokenLimitInput && !modelOverrideInput}
+                    onClick={() => {
+                      if (!parsedForkPayload.valid) return;
+                      const tokenLimit = tokenLimitInput ? Number(tokenLimitInput) : null;
+                      const modified = applyPayloadOverrides(parsedForkPayload.value, tokenLimit, modelOverrideInput);
+                      setForkPayload(JSON.stringify(modified, null, 2));
+                    }}
+                  >
+                    Apply overrides to payload
+                  </Button>
+                </div>
+              );
+            })()}
+
+            {/* Diff view — shown when payload differs from original */}
+            {(() => {
+              if (!forkOriginalPayload || forkPayload === forkOriginalPayload) return null;
+              const diff = computeLineDiff(forkOriginalPayload, forkPayload);
+              if (!diff) return null;
+              const changed = diff.filter((s) => s.type !== "unchanged");
+              if (changed.length === 0) return null;
+              return (
+                <div className="rounded-xl border bg-muted/10 overflow-hidden">
+                  <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/20">
+                    <span className="text-xs font-medium text-muted-foreground">Changes from original</span>
+                    <span className="text-xs text-muted-foreground">{changed.length} line{changed.length === 1 ? "" : "s"} changed</span>
+                  </div>
+                  <div className="max-h-40 overflow-y-auto">
+                    {diff.filter((s) => s.type !== "unchanged" || /* show context */ false).slice(0, 60).map((seg, i) => (
+                      seg.type === "unchanged" ? null : (
+                        <div
+                          key={i}
+                          className={`px-3 py-0.5 font-mono text-[11px] ${
+                            seg.type === "removed"
+                              ? "bg-red-500/10 text-red-600 dark:text-red-400 line-through"
+                              : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                          }`}
+                        >
+                          {seg.type === "removed" ? "− " : "+ "}{seg.line}
+                        </div>
+                      )
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="flex items-center justify-between gap-3 rounded-xl border bg-muted/20 px-3 py-2 text-sm">
               <div className="font-medium">JSON validation</div>
               {parsedForkPayload.valid ? (
@@ -1106,25 +1475,37 @@ const [forkSaved, setForkSaved] = useState(false);
               )}
             </div>
             <Textarea
-              className="min-h-80 font-mono text-xs"
+              className="min-h-64 font-mono text-xs"
               value={forkPayload}
               onChange={(event) => setForkPayload(event.target.value)}
             />
-           {!parsedForkPayload.valid ? (
-  <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-    {parsedForkPayload.error}
-  </div>
-) : forkSaved ? (
-  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
-    Draft saved. Re-run your pipeline with this payload injected at the handoff point, then open the new trace to see whether the fix held.
-  </div>
-) : (
-  <div className="text-sm text-muted-foreground">
-    Save is enabled. Rifft will keep this draft attached to the selected handoff.
-  </div>
-)}
+            {!parsedForkPayload.valid ? (
+              <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                {parsedForkPayload.error}
+              </div>
+            ) : forkSaved ? (
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
+                Draft saved. Re-run your pipeline with this payload injected at the handoff point, then open the new trace to see whether the fix held.
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">
+                Rifft will keep this draft attached to the selected handoff.
+              </div>
+            )}
           </div>
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!parsedForkPayload.valid}
+              onClick={() => {
+                void navigator.clipboard.writeText(forkPayload);
+                toast.success("Payload copied to clipboard");
+              }}
+            >
+              <Copy className="h-3.5 w-3.5" />
+              Copy payload
+            </Button>
             <Button variant="ghost" onClick={() => setForkOpen(false)}>
               Cancel
             </Button>
@@ -1195,6 +1576,9 @@ const [forkSaved, setForkSaved] = useState(false);
                       variant="outline"
                       onClick={() => {
                         setMessageOverlayOpen(false);
+                        if (overlayOpenedFromSheet.current && overlaySourceAgentId.current) {
+                          setSelectedAgentId(overlaySourceAgentId.current);
+                        }
                         setSheetOpen(true);
                       }}
                     >
