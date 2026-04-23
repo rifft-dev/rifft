@@ -268,7 +268,7 @@ const sendAlertEmail = async ({
   }
 };
 
-const anthropicModel = process.env.ANTHROPIC_MODEL ?? "claude-3-5-sonnet-20241022";
+const anthropicModel = process.env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-4-6";
 
 const truncateText = (value: string, maxLength: number) =>
   value.length <= maxLength ? value : `${value.slice(0, maxLength)}…`;
@@ -488,7 +488,7 @@ const generateFailureExplanationWithAnthropic = async (
     }
   | null
 > => {
-  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!anthropicApiKey) {
     throw new Error("anthropic_not_configured");
   }
@@ -558,7 +558,7 @@ ${JSON.stringify(promptContext.context, null, 2)}`;
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => "");
-    throw new Error(`anthropic_request_failed:${response.status}:${errorBody}`);
+    throw new Error(`anthropic_request_failed:${response.status}:${errorBody.slice(0, 500)}`);
   }
 
   const body = (await response.json()) as {
@@ -1827,6 +1827,13 @@ app.get("/traces/:traceId/failure-explanation", async (request, reply) => {
     if (error instanceof Error && error.message === "no_fatal_failure") {
       return { explanation: null };
     }
+    request.log.error(
+      {
+        err: error,
+        traceId,
+      },
+      "failure explanation generation failed",
+    );
     reply.code(502);
     return { error: "failure_explanation_unavailable" };
   }
@@ -1884,6 +1891,13 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
       reply.code(500);
       return { error: "failure_explanations_not_configured" };
     }
+    request.log.error(
+      {
+        err: error,
+        traceId,
+      },
+      "failure explanation regeneration failed",
+    );
     reply.code(502);
     return { error: "failure_explanation_unavailable" };
   }

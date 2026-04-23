@@ -48,7 +48,7 @@ export const buildIncidentReport = (
   const comparisonSection = comparison
     ? [
         "## Before / After",
-        `- Baseline trace: \`${comparison.baseline?.trace_id ?? "unknown"}\``,
+        `- Reference run: \`${comparison.baseline?.trace_id ?? "unknown"}\``,
         `- Verdict: ${comparison.verdict}`,
         `- Status: ${comparison.status_transition.baseline} -> ${comparison.status_transition.current}`,
         `- Failure delta: ${formatSignedNumber(comparison.deltas.failure_count)}`,
@@ -67,7 +67,7 @@ export const buildIncidentReport = (
       ].join("\n")
     : [
         "## Before / After",
-        "- No baseline comparison is available yet for this incident.",
+        "- No reference-run comparison is available yet for this incident.",
       ].join("\n");
 
   const recommendedFix = primaryFailureMeta?.recommendedFix ?? "Inspect the failing handoff and add a more specific guardrail or validation step.";

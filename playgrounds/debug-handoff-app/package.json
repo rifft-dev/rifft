@@ -1,0 +1,14 @@
+{
+  "name": "@rifft/playground-debug-handoff-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:sdk": "pnpm --filter @rifft-dev/rifft build",
+    "broken": "pnpm run build:sdk && node --env-file=.env --import ../../packages/sdk-js/node_modules/tsx/dist/loader.mjs src/index.ts broken",
+    "fixed": "pnpm run build:sdk && node --env-file=.env --import ../../packages/sdk-js/node_modules/tsx/dist/loader.mjs src/index.ts fixed",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@rifft-dev/rifft": "workspace:*"
+  }
+}

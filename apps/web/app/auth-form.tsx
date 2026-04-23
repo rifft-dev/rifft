@@ -45,18 +45,17 @@ export function AuthForm({
     <div className="w-full max-w-[48rem] space-y-8">
       <div className="space-y-5">
 
-        <h1 className="max-w-[14ch] text-[3rem] font-semibold leading-[1.03] tracking-[-0.025em] text-balance sm:text-[3.15rem] lg:text-[3.35rem]">
-          For the agent failures
+        <h1 className="max-w-[15ch] text-[3rem] font-semibold leading-[1.03] tracking-[-0.025em] text-balance sm:text-[3.15rem] lg:text-[3.35rem]">
+          The debugger for
           <br />
-          that are rare,
+          multi-agent systems
           <br />
-          expensive, and hard to explain.
+          and complex AI workflows.
         </h1>
         <p className="max-w-[52ch] text-[17px] leading-7 text-muted-foreground">
-          Most runs are fine. The problem is the failures that take hours to untangle because the
-          visible error is downstream from the real cause. Rifft helps you trace the bad handoff,
-          identify which earlier agent introduced bad state, and replay from the exact failure point
-          instead of rerunning the whole workflow.
+          When a run fails, the visible error is often downstream from the real cause. Rifft helps
+          you trace the bad handoff, identify where the failure actually started, and replay from
+          the exact point things went wrong.
         </p>
       </div>
 

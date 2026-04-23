@@ -35,6 +35,7 @@ type FirstTraceError = "unauthorized" | "forbidden" | "missing_active_project" |
 
 type RuntimeOption = "python" | "node";
 type FrameworkOption = "crewai" | "autogen" | "custom" | "mcp";
+type PackageManagerOption = "npm" | "pnpm" | "yarn";
 
 const runtimeFrameworks: Record<RuntimeOption, FrameworkOption[]> = {
   python: ["crewai", "autogen", "custom"],
@@ -48,15 +49,47 @@ const frameworkLabels: Record<FrameworkOption, string> = {
   mcp: "MCP",
 };
 
+const runtimeMeta: Record<RuntimeOption, { title: string; description: string }> = {
+  python: {
+    title: "Python",
+    description: "CrewAI, AutoGen, and Python-based custom orchestration.",
+  },
+  node: {
+    title: "Node.js",
+    description: "JavaScript or TypeScript agents, services, and MCP clients.",
+  },
+};
+
+const frameworkMeta: Record<FrameworkOption, { title: string; description: string }> = {
+  crewai: {
+    title: "CrewAI",
+    description: "Auto-instrument CrewAI runs after `rifft.init(...)`.",
+  },
+  autogen: {
+    title: "AutoGen",
+    description: "Auto-instrument AutoGen flows with the Python adapter.",
+  },
+  custom: {
+    title: "Custom",
+    description: "Instrument your own agent and tool boundaries directly.",
+  },
+  mcp: {
+    title: "MCP",
+    description: "Wrap an MCP client and emit tool-call spans automatically.",
+  },
+};
+
 const buildInstallSnippet = ({
   runtime,
   framework,
+  packageManager,
   projectId,
   ingestUrl,
   apiKey,
 }: {
   runtime: RuntimeOption;
   framework: FrameworkOption;
+  packageManager: PackageManagerOption;
   projectId: string;
   ingestUrl: string;
   apiKey: string | null;
@@ -80,8 +113,21 @@ rifft.init(
 )`;
   }
 
+  const installCommand =
+    packageManager === "pnpm"
+      ? framework === "mcp"
+        ? "pnpm add @rifft-dev/rifft @rifft-dev/mcp"
+        : "pnpm add @rifft-dev/rifft"
+      : packageManager === "yarn"
+        ? framework === "mcp"
+          ? "yarn add @rifft-dev/rifft @rifft-dev/mcp"
+          : "yarn add @rifft-dev/rifft"
+        : framework === "mcp"
+          ? "npm install @rifft-dev/rifft @rifft-dev/mcp"
+          : "npm install @rifft-dev/rifft";
+
   if (framework === "mcp") {
-    return `npm install @rifft-dev/rifft @rifft-dev/mcp
+    return `${installCommand}
 
 import { init } from "@rifft-dev/rifft";
 import { instrumentMcpClient } from "@rifft-dev/mcp";
@@ -98,7 +144,7 @@ const tracedClient = instrumentMcpClient(mcpClient, {
 });`;
   }
 
-  return `npm install @rifft-dev/rifft
+  return `${installCommand}
 
 import { init, withSpan } from "@rifft-dev/rifft";
 
@@ -131,17 +177,19 @@ export function FirstTraceOnboarding({
   const [pollingError, setPollingError] = useState<FirstTraceError>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
   const [runtime, setRuntime] = useState<RuntimeOption>("python");
+  const [packageManager, setPackageManager] = useState<PackageManagerOption>("npm");
   const [framework, setFramework] = useState<FrameworkOption>("crewai");
   const installSnippet = useMemo(
     () =>
       buildInstallSnippet({
         runtime,
         framework,
+        packageManager,
         projectId: project.id,
         ingestUrl,
         apiKey: project.api_key,
       }),
-    [framework, ingestUrl, project.api_key, project.id, runtime],
+    [framework, ingestUrl, packageManager, project.api_key, project.id, runtime],
   );
 
   useEffect(() => {
@@ -328,54 +376,88 @@ export function FirstTraceOnboarding({
 
             <div className="space-y-3">
               <div className="text-sm font-medium">Install and send your first trace</div>
-              <div className="flex flex-wrap gap-2">
-                {(["python", "node"] as const).map((option) => (
-                  <Button
-                    key={option}
-                    type="button"
-                    variant={runtime === option ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setRuntime(option)}
-                  >
-                    {option === "python" ? "Python" : "Node.js"}
-                  </Button>
-                ))}
+              <div className="space-y-3 rounded-2xl border bg-muted/15 p-4">
+                <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                  1. Choose runtime
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {(["python", "node"] as const).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className={`rounded-2xl border px-4 py-3 text-left transition-colors ${
+                        runtime === option
+                          ? "border-primary bg-primary/8"
+                          : "border-border bg-background hover:bg-muted/40"
+                      }`}
+                      onClick={() => setRuntime(option)}
+                    >
+                      <div className="text-sm font-medium">{runtimeMeta[option].title}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {runtimeMeta[option].description}
+                      </div>
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {(["crewai", "autogen", "custom"] as const).map((option) => (
-                  runtimeFrameworks[runtime].includes(option) ? (
-                  <Button
-                    key={option}
-                    type="button"
-                    variant={framework === option ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setFramework(option)}
-                  >
-                    {frameworkLabels[option]}
-                  </Button>
-                  ) : null
-                ))}
-                {runtimeFrameworks[runtime].includes("mcp") ? (
-                  <Button
-                    key="mcp"
-                    type="button"
-                    variant={framework === "mcp" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setFramework("mcp")}
-                  >
-                    {frameworkLabels.mcp}
-                  </Button>
-                ) : null}
+              <div className="space-y-3 rounded-2xl border bg-muted/15 p-4">
+                <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                  2. Choose integration
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {runtimeFrameworks[runtime].map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className={`rounded-2xl border px-4 py-3 text-left transition-colors ${
+                        framework === option
+                          ? "border-primary bg-primary/8"
+                          : "border-border bg-background hover:bg-muted/40"
+                      }`}
+                      onClick={() => setFramework(option)}
+                    >
+                      <div className="text-sm font-medium">{frameworkMeta[option].title}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {frameworkMeta[option].description}
+                      </div>
+                    </button>
+                  ))}
+                </div>
               </div>
+              {runtime === "node" ? (
+                <div className="space-y-3 rounded-2xl border bg-muted/15 p-4">
+                  <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                    3. Choose package manager
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {(["npm", "pnpm", "yarn"] as const).map((option) => (
+                      <Button
+                        key={option}
+                        type="button"
+                        variant={packageManager === option ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setPackageManager(option)}
+                      >
+                        {option}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               {!canShowSnippet ? (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-muted-foreground">
                   Ask a project owner to copy this snippet for you. Hosted API keys are only visible to owners, so this setup cannot be completed from a member account alone.
                 </div>
               ) : (
                 <>
-                  <pre className="overflow-x-auto rounded-2xl border bg-muted/30 p-4 text-xs leading-6">
-                    <code>{installSnippet}</code>
-                  </pre>
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                      {runtime === "python" ? "3. Run this setup snippet" : "4. Run this setup snippet"}
+                    </div>
+                    <pre className="overflow-x-auto rounded-2xl border bg-muted/30 p-4 text-xs leading-6">
+                      <code>{installSnippet}</code>
+                    </pre>
+                  </div>
                   <div className="flex flex-wrap gap-2">
                     <Button
                       variant="outline"
@@ -502,7 +584,7 @@ export function FirstTraceOnboarding({
                       ? <>Install <code>@rifft-dev/mcp</code> to wrap your MCP client and emit tool-call spans automatically.</>
                       : runtime === "node"
                         ? <>Use <code>@rifft-dev/rifft</code> in your Node app, then wrap the important agent and tool boundaries with spans.</>
-                    : framework === "crewai"
+                        : framework === "crewai"
                       ? <>If <code>rifft-crewai</code> is installed, <code>rifft.init(...)</code> auto-instruments CrewAI for you.</>
                       : framework === "autogen"
                         ? <>If <code>rifft-autogen</code> is installed, <code>rifft.init(...)</code> auto-instruments AutoGen for you.</>

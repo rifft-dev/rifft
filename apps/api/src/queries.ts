@@ -633,9 +633,10 @@ const buildCausalAttribution = (
     .filter((agentId): agentId is string => Boolean(agentId));
   const errorAgents = executionSpans
     .filter((span) => span.agent_id && span.status === "error")
+    .sort((left, right) => new Date(right.end_time).getTime() - new Date(left.end_time).getTime())
     .map((span) => span.agent_id)
     .filter((agentId): agentId is string => Boolean(agentId));
-  const failingAgentId = [...fatalFailureAgents, ...errorAgents][0] ?? null;
+  const failingAgentId = [...errorAgents, ...fatalFailureAgents][0] ?? null;
 
   if (!failingAgentId) {
     return {

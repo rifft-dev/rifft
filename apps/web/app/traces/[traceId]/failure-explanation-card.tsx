@@ -10,6 +10,7 @@ import type { TraceFailureExplanation } from "../../lib/api-types";
 
 type LoadState =
   | { kind: "loading" }
+  | { kind: "fallback"; reason: "paid_plan_required" | "unavailable" }
   | { kind: "hidden" }
   | { kind: "error"; message: string }
   | { kind: "ready"; explanation: TraceFailureExplanation };
@@ -33,10 +34,22 @@ export function FailureExplanationCard({
   traceId,
   canRegenerate,
   hasFatalFailure,
+  primaryFailure,
+  rootCauseAgent,
+  failingAgent,
+  causalChain,
 }: {
   traceId: string;
   canRegenerate: boolean;
   hasFatalFailure: boolean;
+  primaryFailure?: {
+    mode: string;
+    agent_id: string | null;
+    explanation: string;
+  } | null;
+  rootCauseAgent?: string | null;
+  failingAgent?: string | null;
+  causalChain?: string[];
 }) {
   const [state, setState] = useState<LoadState>(hasFatalFailure ? { kind: "loading" } : { kind: "hidden" });
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -64,11 +77,16 @@ export function FailureExplanationCard({
         }
 
         if (response.status === 403 && data.error === "failure_explanations_require_paid_plan") {
-          setState({ kind: "hidden" });
+          setState({ kind: "fallback", reason: "paid_plan_required" });
           return;
         }
 
         if (!response.ok) {
+          if (data.error === "failure_explanation_unavailable") {
+            setState({ kind: "fallback", reason: "unavailable" });
+            return;
+          }
+
           setState({ kind: "error", message: getErrorMessage(data.error) });
           return;
         }
@@ -131,9 +149,9 @@ export function FailureExplanationCard({
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="flex items-center gap-2 text-lg">
             <Bot className="h-5 w-5 text-chart-1" />
-            Failure explanation
+            {state.kind === "fallback" ? "What Rifft found" : "What happened"}
           </CardTitle>
-          {canRegenerate ? (
+          {canRegenerate && state.kind !== "fallback" ? (
             <Button
               type="button"
               variant="outline"
@@ -159,6 +177,47 @@ export function FailureExplanationCard({
           <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-4 text-sm text-muted-foreground">
             {state.message}
           </div>
+        ) : null}
+
+        {state.kind === "fallback" ? (
+          <>
+            <div className="rounded-2xl border bg-background/60 p-4">
+              <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                Summary
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {primaryFailure
+                  ? `${primaryFailure.mode} was detected${primaryFailure.agent_id ? ` around ${primaryFailure.agent_id}` : ""}.`
+                  : "Rifft detected a fatal failure in this trace."}{" "}
+                Inspect the highlighted message to see what was sent between agents.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border bg-background/60 p-4">
+                <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                  Path
+                </div>
+                <div className="mt-2 font-mono text-sm">
+                  {causalChain && causalChain.length > 0
+                    ? causalChain.join(" -> ")
+                    : `${rootCauseAgent ?? "Unknown"} -> ${failingAgent ?? "Unknown"}`}
+                </div>
+              </div>
+              <div className="rounded-2xl border bg-background/60 p-4">
+                <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                  Next step
+                </div>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Open the bad message, check the payload, then add validation or a safer handoff before rerunning.
+                </p>
+              </div>
+            </div>
+            {state.reason === "paid_plan_required" ? (
+              <p className="text-xs text-muted-foreground">
+                Natural-language explanations and suggested fixes are available on Pro and Scale.
+              </p>
+            ) : null}
+          </>
         ) : null}
 
         {state.kind === "ready" ? (
@@ -209,7 +268,7 @@ export function FailureExplanationCard({
 
             <div className="rounded-2xl border bg-background/60 p-4">
               <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                What happened
+                Summary
               </div>
               <p className="mt-2 text-sm text-muted-foreground">{state.explanation.summary}</p>
             </div>
@@ -227,7 +286,7 @@ export function FailureExplanationCard({
             </div>
             <div className="rounded-2xl border bg-background/60 p-4">
               <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                What to change next
+                Suggested fix
               </div>
               <p className="mt-2 text-sm text-muted-foreground">{state.explanation.recommended_fix}</p>
             </div>

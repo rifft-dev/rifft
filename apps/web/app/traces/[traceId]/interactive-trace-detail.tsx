@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, CircleAlert, Copy, GitBranch, Loader2, Play, RadioTower, ShieldAlert } from "lucide-react";
+import { CheckCircle2, CircleAlert, Copy, GitBranch, Loader2, Play, ShieldAlert } from "lucide-react";
 import {
   Background,
   Controls,
+  Handle,
   MarkerType,
-  MiniMap,
+  Position,
   ReactFlow,
   ReactFlowProvider,
   type Edge,
@@ -231,6 +232,7 @@ function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData>>) {
       <Tooltip>
         <TooltipTrigger asChild>
           <Card className={`min-w-48 bg-card/95 shadow-sm ${borderClass} ${selected ? "ring-2 ring-ring" : ""}`}>
+            <Handle type="target" position={Position.Left} className="!h-3 !w-3 !border-background !bg-muted-foreground" />
             <CardHeader className="space-y-2 p-3">
               <div className="flex items-center justify-between gap-2">
                 <CardTitle className="font-mono text-sm">{data.id}</CardTitle>
@@ -246,6 +248,7 @@ function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData>>) {
               <div>{formatCurrency(data.cost_usd)}</div>
               <div>{data.duration_ms}ms</div>
             </CardContent>
+            <Handle type="source" position={Position.Right} className="!h-3 !w-3 !border-background !bg-muted-foreground" />
           </Card>
         </TooltipTrigger>
         <TooltipContent side="top">
@@ -327,9 +330,6 @@ const [forkSaved, setForkSaved] = useState(false);
           failure.agent_id === selectedMessage.target_agent_id,
       )
     : [];
-  const rootCauseAgent = trace.causal_attribution.root_cause_agent_id ?? "Not inferred";
-  const failingAgent = trace.causal_attribution.failing_agent_id ?? "Not inferred";
-  const hasIncidentContext = trace.mast_failures.length > 0 || trace.status === "error";
   const causalExplanation =
     trace.causal_attribution.explanation ??
     "Rifft has not inferred a causal chain for this trace yet. You can still inspect spans, messages, and failures below.";
@@ -464,6 +464,8 @@ const [forkSaved, setForkSaved] = useState(false);
   }, [trace.project_id]);
   const replayProgressLabel =
     replaySpans.length > 0 ? `${Math.min(replayIndex + 1, replaySpans.length)} of ${replaySpans.length}` : "No replay path";
+  const canStepReplayBack = replayMode && replayIndex > 0;
+  const canStepReplayForward = replayMode && replayIndex < replaySpans.length - 1;
   const activeReplayIds = new Set(
     replayMode
       ? replaySpans.slice(0, replayIndex + 1).map((span) => span.span_id)
@@ -698,56 +700,19 @@ const [forkSaved, setForkSaved] = useState(false);
   return (
     <>
       <div className="space-y-6 px-6 py-6">
+        <FailureExplanationCard
+          traceId={trace.trace_id}
+          canRegenerate={canRegenerateFailureExplanation}
+          hasFatalFailure={trace.mast_failures.some((failure) => failure.severity === "fatal")}
+          primaryFailure={trace.mast_failures[0] ?? null}
+          rootCauseAgent={trace.causal_attribution.root_cause_agent_id}
+          failingAgent={trace.causal_attribution.failing_agent_id}
+          causalChain={trace.causal_attribution.causal_chain}
+        />
+
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_380px]">
           <div className="space-y-6">
-            <div className={`section-fade grid gap-4 ${hasIncidentContext ? "md:grid-cols-4" : "md:grid-cols-2"}`}>
-              {hasIncidentContext ? (
-                <>
-                  <Card className="rounded-2xl border-destructive/20 bg-gradient-to-br from-destructive/8 to-transparent">
-                    <CardHeader>
-                      <CardTitle className="text-sm text-muted-foreground">Root cause</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      <div className="font-mono text-sm font-semibold">{rootCauseAgent}</div>
-                      <Badge variant="destructive">{trace.mast_failures[0]?.mode ?? "Failure detected"}</Badge>
-                    </CardContent>
-                  </Card>
-                  <Card className="rounded-2xl">
-                    <CardHeader>
-                      <CardTitle className="text-sm text-muted-foreground">Failing agent</CardTitle>
-                    </CardHeader>
-                    <CardContent className="font-mono text-sm font-semibold">{failingAgent}</CardContent>
-                  </Card>
-                </>
-              ) : null}
-              <Card
-                className={`rounded-2xl transition-colors ${trace.communication_spans.length > 0 ? "cursor-pointer hover:border-primary/40 hover:bg-muted/30" : ""}`}
-                onClick={() => {
-                  if (trace.communication_spans.length > 0) {
-                    enterReplayMode();
-                  }
-                }}
-              >
-                <CardHeader>
-                  <CardTitle className="text-sm text-muted-foreground">Handoff path</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="text-2xl font-semibold">{trace.communication_spans.length}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {trace.communication_spans.length > 0
-                      ? "saved handoff steps · click to step through"
-                      : "communication steps captured"}
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="rounded-2xl">
-                <CardHeader>
-                  <CardTitle className="text-sm text-muted-foreground">Total cost</CardTitle>
-                </CardHeader>
-                <CardContent className="text-2xl font-semibold">{formatCurrency(trace.total_cost_usd)}</CardContent>
-              </Card>
-            </div>
-
+            {liveState.isLive || liveState.sessionExpired ? (
             <Card className="section-fade rounded-2xl border border-chart-1/25 bg-[radial-gradient(circle_at_left,hsl(var(--chart-1))/0.1,transparent_40%),hsl(var(--card))]">
               <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
                 <div className="space-y-2">
@@ -767,36 +732,22 @@ const [forkSaved, setForkSaved] = useState(false);
                       : "This trace is no longer receiving new spans. You are looking at the latest stored snapshot."}
                   </p>
                 </div>
-                <div className="rounded-2xl border bg-background/80 px-4 py-3 text-sm text-muted-foreground">
-                  <div className="flex items-center gap-2 font-medium text-foreground">
-                    <RadioTower className="h-4 w-4 text-chart-1" />
-                    In-flight anomaly watch
-                  </div>
-                  <div className="mt-1">
-                    {trace.mast_failures.length > 0
-                      ? `${trace.mast_failures.length} MAST signal${trace.mast_failures.length === 1 ? "" : "s"} detected so far`
-                      : "No MAST anomalies detected yet"}
-                  </div>
-                </div>
               </CardContent>
             </Card>
+            ) : null}
 
             <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "graph" | "timeline")} className="section-fade space-y-4">
               <div className="flex flex-col gap-4 rounded-3xl border bg-card/70 p-4 shadow-sm backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between">
                 <div className="space-y-2">
                   <TabsList>
-                    <TabsTrigger value="graph">Graph</TabsTrigger>
+                    <TabsTrigger value="graph">Where it broke</TabsTrigger>
                     <TabsTrigger value="timeline">Timeline</TabsTrigger>
                   </TabsList>
-                  <p className="text-sm text-muted-foreground">
-                    Move between the causal graph and the timing view without losing the selected
-                    handoff or replay position.
-                  </p>
                 </div>
                 <div className="text-sm text-muted-foreground">
                   {replayMode
-                    ? "Step-through controls are anchored to the graph below. This does not rerun your pipeline."
-                    : "Start stepping through recorded handoffs from the graph when you want to inspect the cascade."}
+                    ? "Stepping through recorded messages. This does not rerun your pipeline."
+                    : `${trace.communication_spans.length} recorded message${trace.communication_spans.length === 1 ? "" : "s"}`}
                 </div>
               </div>
 
@@ -804,11 +755,7 @@ const [forkSaved, setForkSaved] = useState(false);
                 <Card className="overflow-hidden rounded-3xl border-border/70 bg-card/85 p-0 shadow-sm backdrop-blur-sm">
                   <div className="flex items-center justify-between border-b px-6 py-4">
                     <div>
-                      <div className="text-sm font-medium">Agent communication graph</div>
-                      <div className="text-sm text-muted-foreground">
-                        Follow the chain reaction from the earliest bad handoff to the visible
-                        failure point.
-                      </div>
+                      <div className="text-sm font-medium">Where it broke</div>
                     </div>
                     {trace.mast_failures.length > 0 ? (
                       <Badge variant="destructive">{trace.mast_failures.length} failure(s) detected</Badge>
@@ -820,10 +767,6 @@ const [forkSaved, setForkSaved] = useState(false);
                         <Badge variant="outline" className="pointer-events-auto bg-background/85 backdrop-blur">
                           Step-through {replayProgressLabel}
                         </Badge>
-                      ) : graph.edges.length > 0 ? (
-                        <Badge variant="outline" className="pointer-events-auto bg-background/85 backdrop-blur">
-                          Step-through available
-                        </Badge>
                       ) : null}
                     </div>
                     {graph.edges.length === 0 ? (
@@ -834,7 +777,7 @@ const [forkSaved, setForkSaved] = useState(false);
                           <p className="mt-2 max-w-sm text-sm text-muted-foreground">
                             This trace contains{" "}
                             {graph.nodes.length === 1 ? "a single agent" : `${graph.nodes.length} agents`}{" "}
-                            with no recorded handoffs between them. Check your SDK instrumentation if
+                            with no recorded messages between them. Check your SDK instrumentation if
                             you expected cross-agent spans.
                           </p>
                           {graph.nodes.length > 0 ? (
@@ -866,7 +809,6 @@ const [forkSaved, setForkSaved] = useState(false);
                         >
                           <Background />
                           <Controls />
-                          <MiniMap pannable zoomable />
                         </ReactFlow>
                       </ReactFlowProvider>
                     )}
@@ -874,10 +816,13 @@ const [forkSaved, setForkSaved] = useState(false);
                     <div className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-2xl border bg-background/90 p-2 shadow-lg backdrop-blur">
                       {replayMode ? (
                         <>
-                          <Button variant="outline" onClick={() => stepReplay(-1)}>
+                          <Button variant="outline" disabled={!canStepReplayBack} onClick={() => stepReplay(-1)}>
                             Step back
                           </Button>
-                          <Button onClick={() => stepReplay(1)}>Step forward</Button>
+                          <Button disabled={!canStepReplayForward} onClick={() => stepReplay(1)}>Step forward</Button>
+                          <Badge variant="outline" className="px-3 py-2">
+                            {replayProgressLabel}
+                          </Badge>
                           <Button variant="outline" onClick={openForkDialog}>
                             Save draft here
                           </Button>
@@ -888,7 +833,7 @@ const [forkSaved, setForkSaved] = useState(false);
                       ) : (
                         <Button onClick={enterReplayMode}>
                           <Play className="h-4 w-4" />
-                          Step through handoffs
+                          {replaySpans.length === 1 ? "Inspect" : "Step through"}
                         </Button>
                       )}
                     </div>
@@ -1024,55 +969,13 @@ const [forkSaved, setForkSaved] = useState(false);
           </div>
 
           <div className="space-y-4">
-            <FailureExplanationCard
-              traceId={trace.trace_id}
-              canRegenerate={canRegenerateFailureExplanation}
-              hasFatalFailure={trace.mast_failures.some((failure) => failure.severity === "fatal")}
-            />
-
-            <Card className="rounded-3xl border-destructive/30 bg-gradient-to-br from-destructive/8 via-card to-card shadow-md ring-1 ring-destructive/10">
-              <CardHeader>
-                <div className="flex items-center justify-between gap-3">
-                  <CardTitle className="flex items-center gap-2 text-lg font-semibold">
-                    <AlertTriangle className="h-5 w-5 text-destructive" />
-                    Incident summary
-                  </CardTitle>
-                  <Badge variant={statusVariant(trace.status)}>{trace.status}</Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2 rounded-2xl border bg-background/60 p-4">
-                  <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                    Causal chain
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                   {causalExplanation}
-                  </p>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                  <div className="rounded-2xl border bg-background/60 p-4">
-                    <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                      Root cause agent
-                    </div>
-                    <div className="mt-2 font-mono text-sm">{rootCauseAgent}</div>
-                  </div>
-                  <div className="rounded-2xl border bg-background/60 p-4">
-                    <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                      Failing agent
-                    </div>
-                    <div className="mt-2 font-mono text-sm">{failingAgent}</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
             {trace.communication_spans.length > 0 ? (
             <>
             <Card className="rounded-3xl border-border/50 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base font-medium text-muted-foreground">
                   <GitBranch className="h-4 w-4" />
-                  Selected handoff
+                  Bad message
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -1087,12 +990,9 @@ const [forkSaved, setForkSaved] = useState(false);
                       <div className="text-sm font-medium">
                         {selectedMessage.source_agent_id} {"->"} {selectedMessage.target_agent_id}
                       </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {selectedMessage.start_time}
-                      </div>
                     </div>
                     <div className="rounded-2xl border bg-muted/20 p-4">
-                      <div className="mb-2 text-sm font-medium">Payload preview</div>
+                      <div className="mb-2 text-sm font-medium">Payload</div>
                       <pre className="max-h-56 overflow-auto whitespace-pre-wrap text-xs font-mono text-muted-foreground">
                         {formatJsonPreview(selectedMessage.message)}
                       </pre>
@@ -1108,13 +1008,13 @@ const [forkSaved, setForkSaved] = useState(false);
                     <div className="flex flex-wrap gap-2">
                       <Button onClick={() => setMessageOverlayOpen(true)}>Open full message</Button>
                       <Button variant="outline" onClick={openForkDialog}>
-                        Save draft from this handoff
+                        Save corrected draft
                       </Button>
                     </div>
                   </>
                 ) : (
                   <p className="text-sm text-muted-foreground">
-                    Select an edge in the graph or an event in the timeline to inspect the handoff.
+                    Select a connection in the graph to inspect the message.
                   </p>
                 )}
               </CardContent>
@@ -1124,7 +1024,7 @@ const [forkSaved, setForkSaved] = useState(false);
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base font-medium text-muted-foreground">
                   <ShieldAlert className="h-4 w-4" />
-                  Failures on this path
+                  Why this matters
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -1132,7 +1032,7 @@ const [forkSaved, setForkSaved] = useState(false);
                   <p className="text-sm text-muted-foreground">
                     {selectedMessage
                       ? "No path-specific MAST failures for the current selection."
-                      : "Select an edge or timeline event to see failures on that path."}
+                      : "Select a connection in the graph to see why it matters."}
                   </p>
                 ) : (
                   selectedPathFailures.map((failure) => (

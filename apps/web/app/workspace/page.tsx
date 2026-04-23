@@ -207,7 +207,7 @@ export default async function WorkspacePage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
               <Flag className="h-5 w-5" />
-              Before / after baseline
+              Before / after reference
             </CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
@@ -215,7 +215,7 @@ export default async function WorkspacePage() {
               {baseline ? (
                 <div className="space-y-3">
                   <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                    Current baseline
+                    Current reference run
                   </div>
                   <div className="text-sm font-medium">
   {baseline.trace_id}
@@ -229,22 +229,22 @@ export default async function WorkspacePage() {
                     ) : null}
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Mark a healthy or representative trace as your baseline, then compare newer runs
+                    Mark a healthy or representative trace as your reference run, then compare newer runs
                     against it to see whether the fix actually helped.
                   </p>
                   <Button asChild variant="outline" className="w-full">
-                    <Link href={`/traces/${baseline.trace_id}`}>Open baseline trace</Link>
+                    <Link href={`/traces/${baseline.trace_id}`}>Open reference run</Link>
                   </Button>
                 </div>
               ) : (
                 <div className="space-y-3">
                   <div className="text-sm text-muted-foreground">
-                    You have not marked a baseline yet. Pick a healthy or representative trace and
-                    save it as the baseline so Rifft can show before/after deltas.
+                    No reference run selected yet. Pick a healthy or representative trace so Rifft can
+                    show before/after deltas.
                   </div>
                   <Button asChild variant="outline" className="w-full">
                     <Link href={recentHealthyTrace ? `/traces/${recentHealthyTrace.trace_id}` : "/traces"}>
-                      {recentHealthyTrace ? "Open healthy trace to baseline" : "Open traces"}
+                      {recentHealthyTrace ? "Open healthy trace" : "Open traces"}
                     </Link>
                   </Button>
                 </div>
@@ -265,12 +265,12 @@ export default async function WorkspacePage() {
                       }
                     >
                       {latestFailingComparison.verdict === "improved"
-                        ? "Improved vs baseline"
+                        ? "Improved vs reference"
                         : latestFailingComparison.verdict === "regressed"
-                          ? "Regressed vs baseline"
+                          ? "Regressed vs reference"
                           : latestFailingComparison.verdict === "same"
-                            ? "Same as baseline"
-                            : "Changed vs baseline"}
+                            ? "Same as reference"
+                            : "Changed vs reference"}
                     </Badge>
                     <Badge variant="outline">Latest incident</Badge>
                   </div>
@@ -335,16 +335,16 @@ export default async function WorkspacePage() {
                 <div className="space-y-3">
                   <div className="text-sm text-muted-foreground">
                     {!baseline
-                      ? "Set a baseline first, then Rifft will compare newer incidents against it here."
+                      ? "Choose a reference run first, then Rifft will compare newer incidents against it here."
                       : !latestFailingTrace
-                        ? "You have a baseline, but there is no newer incident to compare against it yet."
+                        ? "You have a reference run, but there is no newer incident to compare against it yet."
                         : baseline.trace_id === latestFailingTrace.trace_id
-                          ? "Your latest incident is also the current baseline. Mark another healthy run as baseline or wait for a newer incident to compare."
-                          : "Rifft has a baseline and a recent incident, but comparison data isn't available for this pair yet."}
+                          ? "Your latest incident is also the reference run. Mark a healthier run as the reference or wait for a newer incident to compare."
+                          : "Rifft has a reference run and a recent incident, but comparison data isn't available for this pair yet."}
                   </div>
                   <Button asChild variant="outline">
                     <Link href={baseline ? "/traces" : recentHealthyTrace ? `/traces/${recentHealthyTrace.trace_id}` : "/traces"}>
-                      {baseline ? "Go to incident queue" : recentHealthyTrace ? "Open healthy trace to baseline" : "Go to traces"}
+                      {baseline ? "Go to incident queue" : recentHealthyTrace ? "Open healthy trace" : "Go to traces"}
                     </Link>
                   </Button>
                 </div>
