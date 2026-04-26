@@ -17,6 +17,7 @@ test("resolveActiveProjectFromProjects clears active project for unauthenticated
     preferredProjectId: "project-stale",
     repaired: false,
     hasCloudProjects: false,
+    isApiAvailable: true,
   });
 });
 
@@ -32,6 +33,7 @@ test("resolveActiveProjectFromProjects preserves the preferred project during cl
     preferredProjectId: "project-2",
     repaired: false,
     hasCloudProjects: false,
+    isApiAvailable: false,
   });
 });
 
@@ -47,6 +49,7 @@ test("resolveActiveProjectFromProjects falls back to default during cloud outage
     preferredProjectId: null,
     repaired: false,
     hasCloudProjects: false,
+    isApiAvailable: false,
   });
 });
 
@@ -62,6 +65,7 @@ test("resolveActiveProjectFromProjects keeps a valid preferred project", () => {
     preferredProjectId: "project-2",
     repaired: false,
     hasCloudProjects: true,
+    isApiAvailable: true,
   });
 });
 
@@ -77,6 +81,7 @@ test("resolveActiveProjectFromProjects repairs stale project cookies when cloud 
     preferredProjectId: "project-stale",
     repaired: true,
     hasCloudProjects: true,
+    isApiAvailable: true,
   });
 });
 
@@ -92,6 +97,7 @@ test("resolveActiveProjectFromProjects clears project context when the user has 
     preferredProjectId: "project-stale",
     repaired: false,
     hasCloudProjects: false,
+    isApiAvailable: true,
   });
 });
 
@@ -101,6 +107,7 @@ test("getCurrentProjectCookieMutation repairs stale cookies when a new active pr
     preferredProjectId: "project-stale",
     repaired: true,
     hasCloudProjects: true,
+    isApiAvailable: true,
   });
 
   assert.deepEqual(mutation, { kind: "set", projectId: "project-1" });
@@ -112,6 +119,7 @@ test("getCurrentProjectCookieMutation deletes stale cookies when no project rema
     preferredProjectId: "project-stale",
     repaired: false,
     hasCloudProjects: false,
+    isApiAvailable: true,
   });
 
   assert.deepEqual(mutation, { kind: "delete" });
@@ -123,6 +131,7 @@ test("getCurrentProjectCookieMutation leaves cookies unchanged during temporary 
     preferredProjectId: "project-2",
     repaired: false,
     hasCloudProjects: false,
+    isApiAvailable: false,
   });
 
   assert.deepEqual(mutation, { kind: "none" });

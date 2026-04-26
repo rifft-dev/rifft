@@ -54,6 +54,7 @@ From the repo root:
 ```bash
 pnpm --dir playgrounds/debug-handoff-app broken
 pnpm --dir playgrounds/debug-handoff-app fixed
+pnpm --dir playgrounds/debug-handoff-app replay ./replay-payload.fixed.json
 ```
 
 From inside the playground:
@@ -61,6 +62,52 @@ From inside the playground:
 ```bash
 pnpm broken
 pnpm fixed
+pnpm replay ./replay-payload.fixed.json
+```
+
+## Replay From A Saved Payload
+
+This playground includes a first version of the app-provided replay hook.
+
+Start the local replay hook:
+
+```bash
+pnpm replay:server
+```
+
+If your Rifft web app is not using the default hook URL, set this in the web app environment:
+
+```bash
+RIFFT_REPLAY_HOOK_URL=http://localhost:8787/rifft/replay
+```
+
+In Rifft:
+
+1. Open the broken trace.
+2. Select the bad `researcher -> writer` message.
+3. Click `Try a fix`.
+4. Edit the payload, or use the sample fixed payload below.
+5. Click `Replay from here`.
+6. Open the new replay trace to confirm pass/fail.
+
+You can still run the same replay hook manually from the CLI:
+
+```bash
+cd playgrounds/debug-handoff-app
+pnpm replay ./replay-payload.fixed.json
+```
+
+The replay command starts from the edited message payload and reruns the downstream `writer` and validation steps. It does not rerun the full workflow.
+
+Expected behavior:
+
+- `replay-payload.broken.json` should fail validation.
+- `replay-payload.fixed.json` should pass validation.
+
+This is the first practical version of the replay loop:
+
+```text
+bad message -> edit payload -> replay downstream step -> verify pass/fail
 ```
 
 ## Environment

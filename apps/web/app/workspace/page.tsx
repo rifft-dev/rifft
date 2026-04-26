@@ -20,6 +20,8 @@ import {
   getTraces,
 } from "../lib/api";
 import { requireCloudProject } from "../lib/require-cloud-project";
+import { resolveActiveProject } from "@/lib/cloud-context";
+import { ProjectCookieRepair } from "@/components/project-cookie-repair";
 
 const formatSpanCount = (value: number) => new Intl.NumberFormat("en-US").format(value);
 const formatPercentage = (value: number) => `${Math.round(value * 100)}%`;
@@ -40,9 +42,14 @@ const formatRelative = (value: string) => {
 };
 
 export default async function WorkspacePage() {
+  const resolution = await resolveActiveProject();
   await requireCloudProject("/workspace");
   const [traceData, insightSummary, baselineResponse, projectSettings] = await Promise.all([
-    getTraces(),
+    getTraces().catch(() => ({
+      traces: [] as Awaited<ReturnType<typeof getTraces>>["traces"],
+      total: 0,
+      page: 1,
+    })),
     getProjectInsights().catch(() => ({
       recent_trace_window: 20,
       insights: [],
@@ -50,14 +57,19 @@ export default async function WorkspacePage() {
     getProjectBaseline().catch(() => ({
       baseline: null,
     })),
-    getProjectSettings(),
+    getProjectSettings().catch(() => ({
+      id: "",
+      permissions: {
+        can_rotate_api_keys: false,
+        can_update_settings: false,
+      },
+    })),
   ]);
   const traces = traceData.traces;
   const topInsights = insightSummary.insights.slice(0, 3);
+  // Only surface genuinely failing traces — never fall back to a healthy run.
   const latestFailingTrace =
-    traces.find((trace) => trace.status === "error" || trace.mast_failures.length > 0) ??
-    traces[0] ??
-    null;
+    traces.find((trace) => trace.status === "error" || trace.mast_failures.length > 0) ?? null;
   const recentHealthyTrace = traces.find((trace) => trace.status === "ok") ?? null;
   const nextTraceTone = latestFailingTrace ? getTraceToneLabels(latestFailingTrace) : null;
   const nextTraceToneCard = latestFailingTrace ? getTraceToneCard(latestFailingTrace) : null;
@@ -65,12 +77,23 @@ export default async function WorkspacePage() {
   const baseline = baselineResponse.baseline;
   const latestFailingComparison =
     latestFailingTrace && baseline && baseline.trace_id !== latestFailingTrace.trace_id
-      ? (await getTraceComparison(latestFailingTrace.trace_id)).comparison
+      ? await getTraceComparison(latestFailingTrace.trace_id)
+          .then((r) => r.comparison)
+          .catch(() => null)
       : null;
   const hasNoTraces = traces.length === 0;
 
   return (
     <div className="space-y-8 px-6 py-8 lg:px-8">
+      {resolution.repaired && resolution.projectId ? (
+        <ProjectCookieRepair projectId={resolution.projectId} />
+      ) : null}
+      {!resolution.isApiAvailable ? (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-muted-foreground">
+          <span className="font-medium text-foreground">Rifft can't reach the server right now.</span>{" "}
+          Some data may be missing or stale. Refresh the page once your connection is restored.
+        </div>
+      ) : null}
       {hasNoTraces ? (
         <section className="rounded-[2rem] border bg-[radial-gradient(circle_at_top_left,hsl(var(--chart-1))/0.12,transparent_28%),hsl(var(--card))] p-8 shadow-sm">
           <div className="max-w-3xl space-y-5">
@@ -95,7 +118,15 @@ export default async function WorkspacePage() {
                   <Link href="/settings">Copy project credentials</Link>
                 </Button>
               </div>
-            ) : null}
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Traces will appear here as your team sends instrumented runs. Your project admin can find setup instructions in{" "}
+                <Link href="/settings" className="font-medium text-foreground underline underline-offset-4">
+                  Settings
+                </Link>
+                .
+              </p>
+            )}
           </div>
         </section>
       ) : null}
@@ -239,12 +270,11 @@ export default async function WorkspacePage() {
               ) : (
                 <div className="space-y-3">
                   <div className="text-sm text-muted-foreground">
-                    No reference run selected yet. Pick a healthy or representative trace so Rifft can
-                    show before/after deltas.
+                    No reference run selected yet. Once you mark a healthy or representative trace as your reference, Rifft will compare every new failure against it — showing you exactly which failure modes are new, which have resolved, and whether things are getting better or worse.
                   </div>
                   <Button asChild variant="outline" className="w-full">
                     <Link href={recentHealthyTrace ? `/traces/${recentHealthyTrace.trace_id}` : "/traces"}>
-                      {recentHealthyTrace ? "Open healthy trace" : "Open traces"}
+                      {recentHealthyTrace ? "Open a healthy trace to set as reference" : "Open traces"}
                     </Link>
                   </Button>
                 </div>

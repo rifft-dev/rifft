@@ -20,6 +20,17 @@ type VerifiedBrief = {
 };
 
 type RunMode = "broken" | "fixed";
+type ReplayPayload = {
+  type?: string;
+  summary?: string;
+  claims?: string[];
+  unsupported_claim?: string;
+  unsupportedClaim?: string;
+  sources?: SourceNote[];
+  removed_claims?: string[];
+  removedClaims?: string[];
+  warning?: string;
+};
 
 type AppConfig = {
   endpoint: string;
@@ -46,6 +57,11 @@ const isResearchBrief = (brief: ResearchBrief | VerifiedBrief): brief is Researc
 
 const createRunId = (mode: RunMode) =>
   `playground-app-${mode}-${new Date().toISOString().replace(/[:.]/g, "-")}-${Math.random()
+    .toString(16)
+    .slice(2, 8)}`;
+
+const createReplayRunId = () =>
+  `playground-app-replay-${new Date().toISOString().replace(/[:.]/g, "-")}-${Math.random()
     .toString(16)
     .slice(2, 8)}`;
 
@@ -215,6 +231,53 @@ const writer = trace({
   });
 });
 
+const replayWriter = trace({
+  agent_id: "writer",
+  framework: "custom",
+  span_name: "agent.write.replay",
+})(async function replayWriterAgent(runId: string, payload: ReplayPayload) {
+  await sleep(120);
+
+  return withSpan("draft.brief.replay", { agent_id: "writer", framework: "custom" }, async (span: RifftSpan) => {
+    const claims = Array.isArray(payload.claims) ? [...payload.claims] : [];
+    const unsupportedClaim = payload.unsupported_claim ?? payload.unsupportedClaim;
+    const removedClaims = payload.removed_claims ?? payload.removedClaims ?? [];
+
+    if (unsupportedClaim && !removedClaims.includes(unsupportedClaim)) {
+      claims.push(unsupportedClaim);
+    }
+
+    span.setAttribute("trace.playground_run_id", runId);
+    span.setAttribute("replay.payload_type", payload.type ?? "unknown");
+    span.setAttribute("replay.removed_claims", removedClaims);
+    span.setAttribute("draft.claims", claims);
+    span.captureDecision({
+      system_prompt: "Replay the writer step with an edited upstream message and validate whether the fix holds.",
+      conversation_history: [
+        {
+          role: "assistant",
+          content: "Received edited replay payload from Rifft.",
+        },
+      ],
+      available_tools: ["finalize_copy"],
+      chosen_action: "finalize_copy",
+      reasoning:
+        removedClaims.length > 0 || !unsupportedClaim
+          ? "The replay payload removes or quarantines unsupported claims before drafting."
+          : "The replay payload still contains an unsupported claim, so validation should catch it.",
+    });
+
+    return {
+      headline: "Unchecked agent handoffs caused the incident to spread.",
+      summary:
+        removedClaims.length > 0 || !unsupportedClaim
+          ? "The replayed brief avoids unsupported certainty and keeps only evidence-backed claims."
+          : "The replayed brief still includes unsupported certainty from the upstream message.",
+      claims,
+    };
+  });
+});
+
 const outputValidator = trace({
   agent_id: "writer",
   framework: "custom",
@@ -325,6 +388,68 @@ export const runScenario = async (mode: RunMode, config: AppConfig): Promise<Sce
         }
 
         const draft = await writer(runId, researchBrief, mode);
+        await outputValidator(runId, draft);
+
+        return {
+          runId,
+          status: "passed" as const,
+          headline: draft.headline,
+        };
+      },
+    );
+
+    return outcome;
+  } catch (error) {
+    if (error instanceof Error) {
+      const errorMessage =
+        error.message === "fetch failed"
+          ? `Trace export failed. Make sure the collector is reachable at ${config.endpoint}.`
+          : error.message;
+
+      return {
+        runId,
+        status: "failed",
+        error: errorMessage,
+      };
+    }
+
+    return {
+      runId,
+      status: "failed",
+      error: String(error),
+    };
+  }
+};
+
+export const replayFromPayload = async (
+  payload: ReplayPayload,
+  config: AppConfig,
+): Promise<ScenarioResult> => {
+  const runId = createReplayRunId();
+
+  init({
+    project_id: config.projectId,
+    endpoint: config.endpoint,
+    api_key: config.apiKey,
+  });
+
+  try {
+    const outcome = await withSpan(
+      "playground.debug_handoff_app.replay",
+      { agent_id: "replay", framework: "custom" },
+      async (rootSpan: RifftSpan) => {
+        rootSpan.setAttribute("trace.playground_run_id", runId);
+        rootSpan.setAttribute("scenario.name", "debug-handoff-app");
+        rootSpan.setAttribute("scenario.mode", "replay");
+        rootSpan.setAttribute("replay.from_agent_id", "researcher");
+        rootSpan.setAttribute("replay.to_agent_id", "writer");
+
+        await recordAgentHandoff(runId, "researcher", "writer", {
+          ...payload,
+          type: payload.type ?? "replay_payload",
+        });
+
+        const draft = await replayWriter(runId, payload);
         await outputValidator(runId, draft);
 
         return {

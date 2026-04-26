@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { InteractiveTraceDetail } from "./interactive-trace-detail";
 import { SetBaselineButton } from "./set-baseline-button";
+import { PartialFailureBanner } from "@/components/partial-failure-banner";
 
 const fallbackAgentDetail = (
   trace: Awaited<ReturnType<typeof getTraceSnapshot>>["trace"],
@@ -43,12 +44,21 @@ const fallbackAgentDetail = (
   };
 };
 
+// Basic sanity-check for traceId — blocks path-traversal and absurdly long inputs
+// before they reach the API. Not a strict UUID check since OTel IDs vary in format.
+const isValidTraceId = (id: string): boolean =>
+  id.length > 0 && id.length <= 128 && /^[a-zA-Z0-9_\-.]+$/.test(id);
+
 export default async function TraceDetailPage({
   params,
 }: {
   params: Promise<{ traceId: string }>;
 }) {
   const { traceId } = await params;
+
+  if (!isValidTraceId(traceId)) {
+    notFound();
+  }
 
   try {
     const snapshot = await getTraceSnapshot(traceId);
@@ -75,22 +85,33 @@ export default async function TraceDetailPage({
               can_update_settings: false,
             },
           };
-    const partialFailures = ancillaryResults.filter((result) => result.status === "rejected").length;
-    const agentDetails = await Promise.all(
-      graph.nodes.map(async (node) => {
-        try {
-          return {
-            agentId: node.id,
-            detail: await getAgentDetail(traceId, node.id),
-          };
-        } catch {
-          return {
-            agentId: node.id,
-            detail: fallbackAgentDetail(trace, graph, node.id),
-          };
-        }
-      }),
-    );
+
+    // Track which ancillary sections failed so the warning is specific.
+    const failedParts: string[] = [
+      comparisonResult.status === "rejected" ? "comparison" : null,
+      forkDraftsResult.status === "rejected" ? "fork drafts" : null,
+      baselineResult.status === "rejected" ? "reference run" : null,
+      projectSettingsResult.status === "rejected" ? "workspace settings" : null,
+    ].filter((part): part is string => part !== null);
+
+    // Fetch agent details in batches to avoid overwhelming the API when a
+    // trace has many agents. Each batch of 5 runs in parallel.
+    const AGENT_BATCH_SIZE = 5;
+    const agentDetails = (
+      await Promise.all(
+        Array.from({ length: Math.ceil(graph.nodes.length / AGENT_BATCH_SIZE) }, (_, i) =>
+          Promise.all(
+            graph.nodes.slice(i * AGENT_BATCH_SIZE, (i + 1) * AGENT_BATCH_SIZE).map(async (node) => {
+              try {
+                return { agentId: node.id, detail: await getAgentDetail(traceId, node.id) };
+              } catch {
+                return { agentId: node.id, detail: fallbackAgentDetail(trace, graph, node.id) };
+              }
+            }),
+          ),
+        ),
+      )
+    ).flat();
     const rootCauseAgent = trace.causal_attribution.root_cause_agent_id ?? "Not inferred";
     const failingAgent = trace.causal_attribution.failing_agent_id ?? "Not inferred";
     const primaryFailure = trace.mast_failures[0]?.mode ?? "No failure detected";
@@ -156,11 +177,7 @@ export default async function TraceDetailPage({
               ) : null}
             </div>
           </div>
-          {partialFailures > 0 ? (
-            <div className="mt-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-muted-foreground">
-              Some comparison or workspace metadata could not be loaded, so Rifft is showing the trace with partial context instead of failing the whole page.
-            </div>
-          ) : null}
+          <PartialFailureBanner failedParts={failedParts} />
           {comparisonData ? (
             <div className="mt-6 flex flex-col gap-3 rounded-2xl border bg-muted/20 p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-2">
@@ -192,12 +209,14 @@ export default async function TraceDetailPage({
                   </Badge>
                 ))}
               </div>
-              <Button asChild variant="ghost" size="sm" className="-ml-3 sm:ml-0">
-                <Link href={`/traces/${comparisonData.baseline?.trace_id}`}>
-                  <ArrowLeft className="h-4 w-4" />
-                  Open reference
-                </Link>
-              </Button>
+              {comparisonData.baseline?.trace_id ? (
+                <Button asChild variant="ghost" size="sm" className="-ml-3 sm:ml-0">
+                  <Link href={`/traces/${comparisonData.baseline.trace_id}`}>
+                    <ArrowLeft className="h-4 w-4" />
+                    Open reference
+                  </Link>
+                </Button>
+              ) : null}
             </div>
           ) : (
             !baseline || isCurrentBaseline ? (
@@ -219,7 +238,12 @@ export default async function TraceDetailPage({
         />
       </div>
     );
-  } catch {
-    notFound();
+  } catch (error) {
+    // Only swallow genuine 404s — re-throw everything else so Next.js can
+    // render the error boundary instead of a misleading "not found" page.
+    if (error instanceof Error && error.message.includes(": 404")) {
+      notFound();
+    }
+    throw error;
   }
 }

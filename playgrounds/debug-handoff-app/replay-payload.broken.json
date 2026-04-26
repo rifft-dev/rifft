@@ -1,0 +1,19 @@
+{
+  "type": "research_brief",
+  "summary": "The incident spread when a downstream writer treated an unverified claim as if it had already been confirmed.",
+  "claims": [
+    "Unchecked handoffs amplified the initial mistake.",
+    "A validation gate would have stopped the unsupported claim earlier."
+  ],
+  "unsupported_claim": "Two independent sources confirmed the issue before publication.",
+  "sources": [
+    {
+      "title": "Postmortem excerpt",
+      "confidence": "medium"
+    },
+    {
+      "title": "Ops chat summary",
+      "confidence": "low"
+    }
+  ]
+}

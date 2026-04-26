@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, Loader2, RefreshCcw } from "lucide-react";
+import { Bot, Copy, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { TraceFailureExplanation } from "../../lib/api-types";
@@ -30,6 +29,106 @@ const getErrorMessage = (error?: string) => {
   }
 };
 
+const getFixKit = (mode?: string | null) => {
+  if (mode === "unverified_information_propagation") {
+    return {
+      validationRule:
+        "Reject or quarantine claims when their supporting sources are low confidence or missing validation.",
+      promptSnippet:
+        "Before finalizing, check every claim against source confidence. Do not state a claim as verified unless the evidence supports that level of certainty.",
+      codeSnippet: `if (claim.sources.every((source) => source.confidence !== "high")) {
+  removedClaims.push(claim.text);
+  continue;
+}`,
+      verification:
+        "Rerun the workflow and confirm the writer no longer receives unsupported claims, and output validation passes.",
+    };
+  }
+
+  if (mode === "missing_output_validation") {
+    return {
+      validationRule:
+        "Require a validation step before any final answer, handoff, or published output is accepted.",
+      promptSnippet:
+        "Before returning the final output, validate it against the task requirements and reject incomplete or unsupported results.",
+      codeSnippet: `const validation = validateOutput(draft);
+if (!validation.passed) {
+  throw new Error(validation.reason);
+}`,
+      verification:
+        "Rerun the workflow and confirm a validation span appears after the final agent output.",
+    };
+  }
+
+  return {
+    validationRule:
+      "Add an explicit guardrail at the failing step and block unsafe or incomplete outputs before they move downstream.",
+    promptSnippet:
+      "Before continuing, check whether the output satisfies the task requirements. If it does not, stop and return the reason.",
+    codeSnippet: `if (!isValid(nextPayload)) {
+  throw new Error("Payload failed validation before the next agent.");
+}`,
+    verification:
+      "Rerun the workflow and confirm the failure mode disappears or moves to an earlier, safer validation point.",
+  };
+};
+
+const CopyButton = ({ value, label = "Copy" }: { value: string; label?: string }) => (
+  <Button
+    type="button"
+    variant="ghost"
+    size="sm"
+    className="h-8 px-2"
+    onClick={() => {
+      void navigator.clipboard.writeText(value);
+      toast.success("Copied.");
+    }}
+  >
+    <Copy className="h-3.5 w-3.5" />
+    {label}
+  </Button>
+);
+
+const FixExamples = ({ fixKit }: { fixKit: ReturnType<typeof getFixKit> }) => (
+  <details className="rounded-2xl border bg-background/60 p-4">
+    <summary className="cursor-pointer text-sm font-medium">Apply this in your app</summary>
+    <p className="mt-2 text-sm text-muted-foreground">
+      Use these as starting points for the guardrail, prompt, or code change that makes this replay pass in production.
+    </p>
+    <div className="mt-4 space-y-4">
+      <div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            Guardrail
+          </div>
+          <CopyButton value={fixKit.validationRule} />
+        </div>
+        <p className="mt-2 text-sm text-muted-foreground">{fixKit.validationRule}</p>
+      </div>
+      <div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            Agent instruction
+          </div>
+          <CopyButton value={fixKit.promptSnippet} />
+        </div>
+        <p className="mt-2 text-sm text-muted-foreground">{fixKit.promptSnippet}</p>
+      </div>
+      <div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            Code pattern
+          </div>
+          <CopyButton value={fixKit.codeSnippet} />
+        </div>
+        <pre className="mt-2 overflow-auto whitespace-pre-wrap rounded-xl bg-muted/40 p-3 text-xs text-muted-foreground">
+          {fixKit.codeSnippet}
+        </pre>
+      </div>
+    </div>
+  </details>
+);
+
 export function FailureExplanationCard({
   traceId,
   canRegenerate,
@@ -53,6 +152,7 @@ export function FailureExplanationCard({
 }) {
   const [state, setState] = useState<LoadState>(hasFatalFailure ? { kind: "loading" } : { kind: "hidden" });
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const fixKit = getFixKit(primaryFailure?.mode);
 
   useEffect(() => {
     if (!hasFatalFailure) {
@@ -149,20 +249,8 @@ export function FailureExplanationCard({
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="flex items-center gap-2 text-lg">
             <Bot className="h-5 w-5 text-chart-1" />
-            {state.kind === "fallback" ? "What Rifft found" : "What happened"}
+            {state.kind === "fallback" ? "What Rifft found" : "What to look at first"}
           </CardTitle>
-          {canRegenerate && state.kind !== "fallback" ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={isRegenerating || state.kind === "loading"}
-              onClick={() => void regenerate()}
-            >
-              {isRegenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-              Regenerate
-            </Button>
-          ) : null}
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -183,7 +271,7 @@ export function FailureExplanationCard({
           <>
             <div className="rounded-2xl border bg-background/60 p-4">
               <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                Summary
+                Start here
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
                 {primaryFailure
@@ -192,104 +280,94 @@ export function FailureExplanationCard({
                 Inspect the highlighted message to see what was sent between agents.
               </p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border bg-background/60 p-4">
-                <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                  Path
-                </div>
-                <div className="mt-2 font-mono text-sm">
-                  {causalChain && causalChain.length > 0
-                    ? causalChain.join(" -> ")
-                    : `${rootCauseAgent ?? "Unknown"} -> ${failingAgent ?? "Unknown"}`}
-                </div>
+            <div className="rounded-2xl border bg-background/60 p-4">
+              <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                What to change
               </div>
-              <div className="rounded-2xl border bg-background/60 p-4">
-                <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                  Next step
-                </div>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Open the bad message, check the payload, then add validation or a safer handoff before rerunning.
-                </p>
-              </div>
+              <p className="mt-2 text-sm text-muted-foreground">{fixKit.validationRule}</p>
             </div>
+            <div className="rounded-2xl border bg-background/60 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                  How to verify
+                </div>
+                <CopyButton value={fixKit.verification} />
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">{fixKit.verification}</p>
+            </div>
+            <details className="rounded-2xl border bg-background/60 p-4">
+              <summary className="cursor-pointer text-sm font-medium">Show path</summary>
+              <div className="mt-3 font-mono text-sm text-muted-foreground">
+                {causalChain && causalChain.length > 0
+                  ? causalChain.join(" -> ")
+                  : `${rootCauseAgent ?? "Unknown"} -> ${failingAgent ?? "Unknown"}`}
+              </div>
+            </details>
             {state.reason === "paid_plan_required" ? (
               <p className="text-xs text-muted-foreground">
-                Natural-language explanations and suggested fixes are available on Pro and Scale.
+                Trace-specific natural-language explanations are available on Pro and Scale.
               </p>
             ) : null}
+            <FixExamples fixKit={fixKit} />
           </>
         ) : null}
 
         {state.kind === "ready" ? (
           <>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline">Claude generated</Badge>
-              <Badge variant="outline">{state.explanation.confidence} confidence</Badge>
-            </div>
-
-            {state.explanation.key_stats && state.explanation.key_stats.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {state.explanation.key_stats.map((stat) => (
-                  <div
-                    key={stat.label}
-                    className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${
-                      stat.flag === "critical"
-                        ? "border-red-500/30 bg-red-500/8"
-                        : stat.flag === "warning"
-                          ? "border-amber-500/30 bg-amber-500/8"
-                          : "border-border bg-background/60"
-                    }`}
-                  >
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${
-                        stat.flag === "critical"
-                          ? "bg-red-500"
-                          : stat.flag === "warning"
-                            ? "bg-amber-400"
-                            : "bg-emerald-400"
-                      }`}
-                    />
-                    <span className="text-muted-foreground">{stat.label}</span>
-                    <span
-                      className={`font-mono font-medium ${
-                        stat.flag === "critical"
-                          ? "text-red-400"
-                          : stat.flag === "warning"
-                            ? "text-amber-300"
-                            : "text-foreground"
-                      }`}
-                    >
-                      {stat.value}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
             <div className="rounded-2xl border bg-background/60 p-4">
               <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                Summary
+                Start here
               </div>
               <p className="mt-2 text-sm text-muted-foreground">{state.explanation.summary}</p>
             </div>
             <div className="rounded-2xl border bg-background/60 p-4">
               <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                Evidence
+                What to change
               </div>
+              <p className="mt-2 text-sm text-muted-foreground">{state.explanation.recommended_fix}</p>
+            </div>
+            <div className="rounded-2xl border bg-background/60 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                  How to verify
+                </div>
+                <CopyButton value={fixKit.verification} />
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">{fixKit.verification}</p>
+            </div>
+
+            <details className="rounded-2xl border bg-background/60 p-4">
+              <summary className="cursor-pointer text-sm font-medium">Show evidence</summary>
               <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
                 {state.explanation.evidence.map((item) => (
-                  <li key={item} className="list-disc pl-1 ml-4">
+                  <li key={item} className="ml-4 list-disc pl-1">
                     {item}
                   </li>
                 ))}
               </ul>
-            </div>
-            <div className="rounded-2xl border bg-background/60 p-4">
-              <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                Suggested fix
-              </div>
-              <p className="mt-2 text-sm text-muted-foreground">{state.explanation.recommended_fix}</p>
-            </div>
+              {state.explanation.key_stats && state.explanation.key_stats.length > 0 ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {state.explanation.key_stats.map((stat) => (
+                    <div key={stat.label} className="rounded-xl border bg-muted/30 px-3 py-2 text-xs">
+                      <span className="text-muted-foreground">{stat.label}: </span>
+                      <span className="font-mono">{stat.value}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </details>
+
+            <FixExamples fixKit={fixKit} />
+            {canRegenerate ? (
+              <button
+                type="button"
+                className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                disabled={isRegenerating}
+                onClick={() => void regenerate()}
+              >
+                {isRegenerating ? "Regenerating…" : "Explanation looks wrong? Regenerate"}
+              </button>
+            ) : null}
           </>
         ) : null}
       </CardContent>

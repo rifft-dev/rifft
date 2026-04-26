@@ -1,15 +1,29 @@
-import { readConfig, runScenario } from "./workflow.js";
+import { readFile } from "node:fs/promises";
+import { readConfig, replayFromPayload, runScenario } from "./workflow.js";
 
 const modeArg = process.argv[2];
 
-if (modeArg !== "broken" && modeArg !== "fixed") {
-  console.error("Usage: node --import tsx src/index.ts <broken|fixed>");
+if (modeArg !== "broken" && modeArg !== "fixed" && modeArg !== "replay") {
+  console.error("Usage: node --import tsx src/index.ts <broken|fixed|replay> [payload.json]");
   process.exit(1);
 }
 
 const config = readConfig();
 
-runScenario(modeArg, config)
+const run =
+  modeArg === "replay"
+    ? readFile(process.argv[3] ?? "", "utf8")
+        .then((content) => replayFromPayload(JSON.parse(content) as Record<string, unknown>, config))
+        .catch((error) => {
+          throw new Error(
+            `Could not load replay payload. Usage: pnpm replay ./payload.json. ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        })
+    : runScenario(modeArg, config);
+
+run
   .then((result) => {
     console.log("");
     console.log("Debug handoff app");
@@ -30,7 +44,9 @@ runScenario(modeArg, config)
     console.log(
       modeArg === "broken"
         ? "Expected trace shape: direct researcher -> writer handoff, then output validation failure."
-        : "Expected trace shape: researcher -> verifier -> writer, then successful output validation.",
+        : modeArg === "fixed"
+          ? "Expected trace shape: researcher -> verifier -> writer, then successful output validation."
+          : "Expected trace shape: replayed researcher -> writer message, then writer validation pass/fail.",
     );
   })
   .catch((error) => {

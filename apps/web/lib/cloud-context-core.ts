@@ -3,6 +3,8 @@ export type ActiveProjectResolution = {
   preferredProjectId: string | null;
   repaired: boolean;
   hasCloudProjects: boolean;
+  /** False when the API was unreachable during resolution — lets pages show a connectivity banner. */
+  isApiAvailable: boolean;
 };
 
 export type CloudProjectsLoadState = "unauthenticated" | "unavailable" | "loaded";
@@ -27,6 +29,7 @@ export const resolveActiveProjectFromProjects = ({
       preferredProjectId,
       repaired: false,
       hasCloudProjects: false,
+      isApiAvailable: true,
     };
   }
 
@@ -36,6 +39,7 @@ export const resolveActiveProjectFromProjects = ({
       preferredProjectId,
       repaired: false,
       hasCloudProjects: false,
+      isApiAvailable: false,
     };
   }
 
@@ -45,6 +49,7 @@ export const resolveActiveProjectFromProjects = ({
       preferredProjectId,
       repaired: false,
       hasCloudProjects: false,
+      isApiAvailable: true,
     };
   }
 
@@ -54,6 +59,7 @@ export const resolveActiveProjectFromProjects = ({
       preferredProjectId,
       repaired: false,
       hasCloudProjects: true,
+      isApiAvailable: true,
     };
   }
 
@@ -62,6 +68,7 @@ export const resolveActiveProjectFromProjects = ({
     preferredProjectId,
     repaired: true,
     hasCloudProjects: true,
+    isApiAvailable: true,
   };
 };
 

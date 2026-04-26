@@ -48,7 +48,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { saveForkDraft as persistForkDraft } from "../../lib/client-api";
+import { replayFromSpan, saveForkDraft as persistForkDraft } from "../../lib/client-api";
 import { formatCurrency } from "@/lib/utils";
 import type { AgentDetail, AgentFailureDiffResult, ForkDraft, TraceDetail, TraceGraph, TraceLiveSnapshot, TraceTimeline } from "../../lib/api-types";
 import { FailureExplanationCard } from "./failure-explanation-card";
@@ -97,6 +97,104 @@ const formatJsonPreview = (value: unknown) => {
   }
 
   return `${formatted.slice(0, MAX_JSON_PREVIEW_CHARS)}\n\n… truncated for preview`;
+};
+
+const buildSuggestedReplayPayload = (payload: unknown) => {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+
+  const original = payload as Record<string, unknown>;
+  const unsupportedClaim =
+    typeof original.unsupported_claim === "string"
+      ? original.unsupported_claim
+      : typeof original.unsupportedClaim === "string"
+        ? original.unsupportedClaim
+        : null;
+
+  if (!unsupportedClaim?.trim()) {
+    return null;
+  }
+
+  const suggested: Record<string, unknown> = { ...original };
+  const existingRemovedClaims = Array.isArray(suggested.removed_claims)
+    ? suggested.removed_claims.filter((claim): claim is string => typeof claim === "string")
+    : Array.isArray(suggested.removedClaims)
+      ? suggested.removedClaims.filter((claim): claim is string => typeof claim === "string")
+    : [];
+  const nextRemovedClaims = existingRemovedClaims.includes(unsupportedClaim)
+    ? existingRemovedClaims
+    : [...existingRemovedClaims, unsupportedClaim];
+
+  delete suggested.unsupported_claim;
+  delete suggested.unsupportedClaim;
+  delete suggested.removedClaims;
+  suggested.removed_claims = nextRemovedClaims;
+
+  if (Array.isArray(suggested.claims)) {
+    suggested.claims = suggested.claims.filter((claim) => claim !== unsupportedClaim);
+  }
+
+  return suggested;
+};
+
+const getPayloadHints = (payload: unknown) => {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return [] as string[];
+  }
+
+  const message = payload as Record<string, unknown>;
+  const hints: string[] = [];
+  const unsupportedClaim =
+    typeof message.unsupported_claim === "string"
+      ? message.unsupported_claim
+      : typeof message.unsupportedClaim === "string"
+        ? message.unsupportedClaim
+        : null;
+
+  if (unsupportedClaim) {
+    hints.push(`This handoff still says "${unsupportedClaim}".`);
+  }
+
+  const removedClaims = Array.isArray(message.removed_claims)
+    ? message.removed_claims.filter((item): item is string => typeof item === "string")
+    : Array.isArray(message.removedClaims)
+      ? message.removedClaims.filter((item): item is string => typeof item === "string")
+      : [];
+
+  if (removedClaims.length > 0) {
+    hints.push(
+      removedClaims.length === 1
+        ? "The message already marks 1 claim as removed."
+        : `The message already marks ${removedClaims.length} claims as removed.`,
+    );
+  }
+
+  const lowConfidenceSources = Array.isArray(message.sources)
+    ? message.sources.filter((item) => {
+        if (!item || typeof item !== "object") return false;
+        const confidence = (item as Record<string, unknown>).confidence;
+        return confidence === "low" || confidence === "medium";
+      }).length
+    : 0;
+
+  if (lowConfidenceSources > 0) {
+    hints.push(
+      lowConfidenceSources === 1
+        ? "1 supporting source is not high confidence."
+        : `${lowConfidenceSources} supporting sources are not high confidence.`,
+    );
+  }
+
+  if (Array.isArray(message.claims)) {
+    hints.push(
+      message.claims.length === 1
+        ? "The handoff carries 1 explicit claim."
+        : `The handoff carries ${message.claims.length} explicit claims.`,
+    );
+  }
+
+  return hints.slice(0, 3);
 };
 
 const buildFallbackAgentDetail = (
@@ -284,7 +382,14 @@ export function InteractiveTraceDetail({
   const [replayMode, setReplayMode] = useState(false);
   const [replayIndex, setReplayIndex] = useState(0);
   const [forkDrafts, setForkDrafts] = useState<ForkDraft[]>(initialForkDrafts);
-const [forkSaved, setForkSaved] = useState(false);
+  const [forkSaved, setForkSaved] = useState(false);
+  const [isReplaying, setIsReplaying] = useState(false);
+  const [replayResult, setReplayResult] = useState<{
+    runId: string;
+    status: "passed" | "failed";
+    headline?: string;
+    error?: string;
+  } | null>(null);
   const [forkOriginalPayload, setForkOriginalPayload] = useState("");
   const [tokenLimitInput, setTokenLimitInput] = useState("");
   const [modelOverrideInput, setModelOverrideInput] = useState("");
@@ -301,12 +406,19 @@ const [forkSaved, setForkSaved] = useState(false);
   const previousFailureCountRef = useRef(initialTrace.mast_failures.length);
 
   const agentById = useMemo(() => new Map(agentRecords.map((item) => [item.agentId, item.detail])), [agentRecords]);
+  const replaySpans = [...trace.communication_spans].sort(
+    (left, right) => new Date(left.start_time).getTime() - new Date(right.start_time).getTime(),
+  );
   const selectedAgent = selectedAgentId ? agentById.get(selectedAgentId) ?? null : null;
   const selectedMessage = selectedSpanId
     ? trace.communication_spans.find((span) => span.span_id === selectedSpanId) ?? null
     : null;
+  const focusMessage = selectedMessage ?? replaySpans[0] ?? null;
   const selectedDraft = selectedMessage
     ? forkDrafts.find((draft) => draft.span_id === selectedMessage.span_id) ?? null
+    : null;
+  const focusDraft = focusMessage
+    ? forkDrafts.find((draft) => draft.span_id === focusMessage.span_id) ?? null
     : null;
   const parsedForkPayload = useMemo(() => {
     if (!forkPayload.trim()) {
@@ -322,14 +434,33 @@ const [forkSaved, setForkSaved] = useState(false);
       };
     }
   }, [forkPayload]);
+  const suggestedForkPayload = useMemo(() => {
+    if (!parsedForkPayload.valid) {
+      return null;
+    }
+
+    const suggested = buildSuggestedReplayPayload(parsedForkPayload.value);
+    if (!suggested) {
+      return null;
+    }
+
+    if (JSON.stringify(suggested) === JSON.stringify(parsedForkPayload.value)) {
+      return null;
+    }
+
+    return {
+      formatted: JSON.stringify(suggested, null, 2),
+    };
+  }, [parsedForkPayload]);
   const timelineRows = [...timeline.agents].sort((left, right) => right.duration_ms - left.duration_ms);
-  const selectedPathFailures = selectedMessage
+  const selectedPathFailures = focusMessage
     ? trace.mast_failures.filter(
         (failure) =>
-          failure.agent_id === selectedMessage.source_agent_id ||
-          failure.agent_id === selectedMessage.target_agent_id,
+          failure.agent_id === focusMessage.source_agent_id ||
+          failure.agent_id === focusMessage.target_agent_id,
       )
     : [];
+  const focusPayloadHints = getPayloadHints(focusDraft?.payload ?? focusMessage?.message ?? null);
   const causalExplanation =
     trace.causal_attribution.explanation ??
     "Rifft has not inferred a causal chain for this trace yet. You can still inspect spans, messages, and failures below.";
@@ -400,9 +531,6 @@ const [forkSaved, setForkSaved] = useState(false);
     };
   }, [liveState.isLive, trace.trace_id, trace.mast_failures.length]);
 
-  const replaySpans = [...trace.communication_spans].sort(
-    (left, right) => new Date(left.start_time).getTime() - new Date(right.start_time).getTime(),
-  );
   useEffect(() => {
     if (replaySpans.length > 0) {
       setReplayIndex((current) => Math.min(current, replaySpans.length - 1));
@@ -634,14 +762,16 @@ const [forkSaved, setForkSaved] = useState(false);
     return segments;
   };
 
-  const openForkDialog = () => {
-    if (!selectedMessage) return;
-    const raw = JSON.stringify(selectedDraft?.payload ?? selectedMessage.message ?? null, null, 2);
+  const openForkDialog = (message = selectedMessage, draft = selectedDraft) => {
+    if (!message) return;
+    setSelectedSpanId(message.span_id);
+    const raw = JSON.stringify(draft?.payload ?? message.message ?? null, null, 2);
     setForkPayload(raw);
     setForkOriginalPayload(raw);
     setForkSaved(false);
     setTokenLimitInput("");
     setModelOverrideInput("");
+    setReplayResult(null);
     setForkOpen(true);
   };
 
@@ -656,16 +786,36 @@ const [forkSaved, setForkSaved] = useState(false);
       );
       setForkDrafts((current) => [draft, ...current.filter((item) => item.span_id !== draft.span_id)]);
       setForkSaved(true);
-      toast.success("Fork draft saved");
+      toast.success("Replay payload saved");
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       if (message.includes("400")) {
-        toast.error("Fork draft must be valid JSON");
+        toast.error("Replay payload must be valid JSON");
       } else if (message.includes("401")) {
         toast.error("Your session expired. Refresh the page and try again.");
       } else {
-        toast.error("Rifft could not save this draft right now.");
+        toast.error("Rifft could not save this replay payload right now.");
       }
+    }
+  };
+
+  const replayCurrentPayload = async () => {
+    if (!selectedMessage || !parsedForkPayload.valid) return;
+
+    try {
+      setIsReplaying(true);
+      setReplayResult(null);
+      const result = await replayFromSpan(trace.trace_id, selectedMessage.span_id, parsedForkPayload.value);
+      setReplayResult(result);
+      if (result.status === "passed") {
+        toast.success("Replay passed.");
+      } else {
+        toast.error(result.error ?? "Replay failed.");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Replay hook is not available.");
+    } finally {
+      setIsReplaying(false);
     }
   };
 
@@ -712,6 +862,50 @@ const [forkSaved, setForkSaved] = useState(false);
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_380px]">
           <div className="space-y-6">
+            {focusMessage ? (
+              <Card className="rounded-3xl border-chart-1/25 bg-[radial-gradient(circle_at_top_left,hsl(var(--chart-1))/0.08,transparent_36%),hsl(var(--card))] shadow-sm">
+                <CardContent className="space-y-4 p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                        First bad handoff
+                      </div>
+                      <div className="font-mono text-sm">
+                        {focusMessage.source_agent_id} {"->"} {focusMessage.target_agent_id}
+                      </div>
+                      <p className="max-w-2xl text-sm text-muted-foreground">
+                        Start here. This is the earliest recorded message in the replay path, so it is the best place to inspect where the conversation first drifted.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => openMessageOverlay(focusMessage.span_id, focusMessage.target_agent_id)}
+                      >
+                        Inspect handoff
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          openForkDialog(focusMessage, focusDraft);
+                        }}
+                      >
+                        Try a fix
+                      </Button>
+                    </div>
+                  </div>
+                  {focusPayloadHints.length > 0 ? (
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      {focusPayloadHints.map((hint) => (
+                        <div key={hint} className="rounded-2xl border bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
+                          {hint}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+            ) : null}
+
             {liveState.isLive || liveState.sessionExpired ? (
             <Card className="section-fade rounded-2xl border border-chart-1/25 bg-[radial-gradient(circle_at_left,hsl(var(--chart-1))/0.1,transparent_40%),hsl(var(--card))]">
               <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
@@ -740,7 +934,7 @@ const [forkSaved, setForkSaved] = useState(false);
               <div className="flex flex-col gap-4 rounded-3xl border bg-card/70 p-4 shadow-sm backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between">
                 <div className="space-y-2">
                   <TabsList>
-                    <TabsTrigger value="graph">Where it broke</TabsTrigger>
+                    <TabsTrigger value="graph">Conversation path</TabsTrigger>
                     <TabsTrigger value="timeline">Timeline</TabsTrigger>
                   </TabsList>
                 </div>
@@ -755,7 +949,7 @@ const [forkSaved, setForkSaved] = useState(false);
                 <Card className="overflow-hidden rounded-3xl border-border/70 bg-card/85 p-0 shadow-sm backdrop-blur-sm">
                   <div className="flex items-center justify-between border-b px-6 py-4">
                     <div>
-                      <div className="text-sm font-medium">Where it broke</div>
+                      <div className="text-sm font-medium">Conversation path</div>
                     </div>
                     {trace.mast_failures.length > 0 ? (
                       <Badge variant="destructive">{trace.mast_failures.length} failure(s) detected</Badge>
@@ -823,8 +1017,8 @@ const [forkSaved, setForkSaved] = useState(false);
                           <Badge variant="outline" className="px-3 py-2">
                             {replayProgressLabel}
                           </Badge>
-                          <Button variant="outline" onClick={openForkDialog}>
-                            Save draft here
+                          <Button variant="outline" onClick={() => openForkDialog()}>
+                            Try a fix
                           </Button>
                           <Button variant="ghost" onClick={() => setReplayMode(false)}>
                             Exit step-through
@@ -833,7 +1027,7 @@ const [forkSaved, setForkSaved] = useState(false);
                       ) : (
                         <Button onClick={enterReplayMode}>
                           <Play className="h-4 w-4" />
-                          {replaySpans.length === 1 ? "Inspect" : "Step through"}
+                          {replaySpans.length === 1 ? "Inspect conversation" : "Follow conversation"}
                         </Button>
                       )}
                     </div>
@@ -975,46 +1169,58 @@ const [forkSaved, setForkSaved] = useState(false);
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base font-medium text-muted-foreground">
                   <GitBranch className="h-4 w-4" />
-                  Bad message
+                  {selectedMessage ? "Selected handoff" : "First bad handoff"}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {selectedMessage ? (
+                {focusMessage ? (
                   <>
                     <div className="flex flex-wrap gap-2">
-                      <Badge variant="outline">{selectedMessage.protocol}</Badge>
-                      <Badge variant={statusVariant(selectedMessage.status)}>{selectedMessage.status}</Badge>
-                      <Badge variant="outline">{selectedMessage.duration_ms}ms</Badge>
+                      <Badge variant="outline">{focusMessage.protocol}</Badge>
+                      <Badge variant={statusVariant(focusMessage.status)}>{focusMessage.status}</Badge>
+                      <Badge variant="outline">{focusMessage.duration_ms}ms</Badge>
                     </div>
                     <div className="rounded-2xl border bg-muted/20 p-4">
                       <div className="text-sm font-medium">
-                        {selectedMessage.source_agent_id} {"->"} {selectedMessage.target_agent_id}
+                        {focusMessage.source_agent_id} {"->"} {focusMessage.target_agent_id}
                       </div>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {selectedMessage
+                          ? "You are inspecting the currently selected handoff."
+                          : "No handoff is selected yet, so Rifft is showing the first message in the replay path."}
+                      </p>
                     </div>
                     <div className="rounded-2xl border bg-muted/20 p-4">
-                      <div className="mb-2 text-sm font-medium">Payload</div>
+                      <div className="mb-2 text-sm font-medium">What this agent passed on</div>
                       <pre className="max-h-56 overflow-auto whitespace-pre-wrap text-xs font-mono text-muted-foreground">
-                        {formatJsonPreview(selectedMessage.message)}
+                        {formatJsonPreview(focusMessage.message)}
                       </pre>
                     </div>
-                    {selectedDraft ? (
+                    {focusDraft ? (
                       <div className="rounded-2xl border bg-muted/20 p-4">
-                        <div className="mb-2 text-sm font-medium">Saved fork draft</div>
+                        <div className="mb-2 text-sm font-medium">Saved replay payload</div>
                         <pre className="max-h-40 overflow-auto whitespace-pre-wrap text-xs font-mono text-muted-foreground">
-                          {formatJsonPreview(selectedDraft.payload)}
+                          {formatJsonPreview(focusDraft.payload)}
                         </pre>
                       </div>
                     ) : null}
                     <div className="flex flex-wrap gap-2">
-                      <Button onClick={() => setMessageOverlayOpen(true)}>Open full message</Button>
-                      <Button variant="outline" onClick={openForkDialog}>
-                        Save corrected draft
+                      <Button onClick={() => openMessageOverlay(focusMessage.span_id, focusMessage.target_agent_id)}>
+                        Open full handoff
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          openForkDialog(focusMessage, focusDraft);
+                        }}
+                      >
+                        Try a fix
                       </Button>
                     </div>
                   </>
                 ) : (
                   <p className="text-sm text-muted-foreground">
-                    Select a connection in the graph to inspect the message.
+                    Select a connection in the conversation path to inspect the message.
                   </p>
                 )}
               </CardContent>
@@ -1024,15 +1230,39 @@ const [forkSaved, setForkSaved] = useState(false);
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base font-medium text-muted-foreground">
                   <ShieldAlert className="h-4 w-4" />
-                  Why this matters
+                  What changed here
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {focusPayloadHints.length > 0 ? (
+                  focusPayloadHints.map((hint) => (
+                    <div key={hint} className="rounded-2xl border p-4 text-sm text-muted-foreground">
+                      {hint}
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {focusMessage
+                      ? "Rifft does not have a compact change summary for this handoff yet."
+                      : "Select a connection in the graph to see what changed."}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl border-border/50 shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base font-medium text-muted-foreground">
+                  <ShieldAlert className="h-4 w-4" />
+                  What happened next
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 {selectedPathFailures.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
-                    {selectedMessage
-                      ? "No path-specific MAST failures for the current selection."
-                      : "Select a connection in the graph to see why it matters."}
+                    {focusMessage
+                      ? "Rifft has not attached a downstream failure summary to this handoff yet."
+                      : "Select a connection in the graph to see what happened next."}
                   </p>
                 ) : (
                   selectedPathFailures.map((failure) => (
@@ -1091,7 +1321,7 @@ const [forkSaved, setForkSaved] = useState(false);
               >
                 <TabsList className="mx-6 mt-4 w-auto justify-start rounded-xl">
                   <TabsTrigger value="messages">
-                    Messages
+                    Saw
                     {selectedAgent.messages.length > 0 ? (
                       <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">
                         {selectedAgent.messages.length}
@@ -1115,7 +1345,7 @@ const [forkSaved, setForkSaved] = useState(false);
                     ) : null}
                   </TabsTrigger>
                   {selectedAgent.decision_context ? (
-                    <TabsTrigger value="context">Context</TabsTrigger>
+                    <TabsTrigger value="context">Decisions</TabsTrigger>
                   ) : null}
                   {agentDiffByAgent.has(selectedAgent.summary.agent_id) ? (
                     <TabsTrigger value="history">History</TabsTrigger>
@@ -1124,7 +1354,9 @@ const [forkSaved, setForkSaved] = useState(false);
                 <ScrollArea className="flex-1">
                   <TabsContent value="messages" className="mt-0 px-6 py-4">
                     {selectedAgent.messages.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No messages recorded for this agent.</p>
+                      <p className="text-sm text-muted-foreground">
+                        No incoming or outgoing handoffs were recorded for this agent.
+                      </p>
                     ) : (
                       <div className="space-y-3">
                         {selectedAgent.messages.map((message) => (
@@ -1264,15 +1496,47 @@ const [forkSaved, setForkSaved] = useState(false);
         </SheetContent>
       </Sheet>
 
-      <Dialog open={forkOpen} onOpenChange={(open) => { setForkOpen(open); if (!open) { setForkSaved(false); setForkOriginalPayload(""); setTokenLimitInput(""); setModelOverrideInput(""); } }}>
+      <Dialog open={forkOpen} onOpenChange={(open) => { setForkOpen(open); if (!open) { setForkSaved(false); setForkOriginalPayload(""); setTokenLimitInput(""); setModelOverrideInput(""); setReplayResult(null); } }}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Save fork draft</DialogTitle>
+            <DialogTitle>Try a fix</DialogTitle>
             <DialogDescription>
-              Override parameters and save a modified payload at this handoff point.
+              Edit the message payload you want to replay from this point. Rifft saves it here so you can use it with your replay hook or rerun command.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
+            {suggestedForkPayload ? (
+              <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium text-emerald-800 dark:text-emerald-200">
+                      Suggested payload edit
+                    </div>
+                    <p className="max-w-xl text-sm text-emerald-800/80 dark:text-emerald-200/80">
+                      Rifft found an unsupported claim in this message. Try moving it to removed_claims,
+                      then replay from here to see whether the fix holds.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setForkPayload(suggestedForkPayload.formatted);
+                      setReplayResult(null);
+                      setForkSaved(false);
+                      toast.success("Suggested payload applied.");
+                    }}
+                  >
+                    Use suggested payload
+                  </Button>
+                </div>
+                <pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-background/70 p-3 text-xs text-muted-foreground">
+                  {suggestedForkPayload.formatted}
+                </pre>
+              </div>
+            ) : null}
+
             {/* Parameter overrides panel */}
             {(() => {
               const detected = parsedForkPayload.valid ? detectPayloadParams(parsedForkPayload.value) : { estimatedTokens: null, model: null };
@@ -1385,11 +1649,22 @@ const [forkSaved, setForkSaved] = useState(false);
               </div>
             ) : forkSaved ? (
               <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
-                Draft saved. Re-run your pipeline with this payload injected at the handoff point, then open the new trace to see whether the fix held.
+                Replay payload saved. Use it with your replay hook or rerun command, then open the new trace to see whether the fix held.
+              </div>
+            ) : replayResult ? (
+              <div
+                className={`rounded-xl border px-3 py-2 text-sm ${
+                  replayResult.status === "passed"
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                    : "border-destructive/30 bg-destructive/10 text-destructive"
+                }`}
+              >
+                Replay {replayResult.status}. New run: <span className="font-mono">{replayResult.runId}</span>
+                {replayResult.error ? <span> · {replayResult.error}</span> : null}
               </div>
             ) : (
               <div className="text-sm text-muted-foreground">
-                Rifft will keep this draft attached to the selected handoff.
+                Rifft will keep this replay payload attached to the selected message.
               </div>
             )}
           </div>
@@ -1409,8 +1684,16 @@ const [forkSaved, setForkSaved] = useState(false);
             <Button variant="ghost" onClick={() => setForkOpen(false)}>
               Cancel
             </Button>
+            <Button
+              variant="outline"
+              onClick={() => void replayCurrentPayload()}
+              disabled={!parsedForkPayload.valid || isReplaying}
+            >
+              {isReplaying ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Replay from here
+            </Button>
             <Button onClick={saveFork} disabled={!parsedForkPayload.valid}>
-              Save fork draft
+              Save replay payload
             </Button>
           </div>
         </DialogContent>
@@ -1419,7 +1702,7 @@ const [forkSaved, setForkSaved] = useState(false);
       <Dialog open={messageOverlayOpen} onOpenChange={setMessageOverlayOpen}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Message detail</DialogTitle>
+            <DialogTitle>Handoff detail</DialogTitle>
             <DialogDescription>
               {selectedMessage
                 ? `${selectedMessage.source_agent_id} -> ${selectedMessage.target_agent_id}`
@@ -1435,14 +1718,14 @@ const [forkSaved, setForkSaved] = useState(false);
                   <Badge variant="outline">{selectedMessage.duration_ms}ms</Badge>
                 </div>
                 <div className="rounded-xl border bg-muted/30 p-4">
-                  <div className="mb-2 text-sm font-medium">Payload</div>
+                  <div className="mb-2 text-sm font-medium">What the next agent saw</div>
                   <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs font-mono text-muted-foreground">
                     {formatJsonPreview(selectedMessage.message)}
                   </pre>
                 </div>
                 {selectedDraft ? (
                   <div className="rounded-xl border bg-muted/30 p-4">
-                    <div className="mb-2 text-sm font-medium">Saved fork draft</div>
+                    <div className="mb-2 text-sm font-medium">Saved replay payload</div>
                     <pre className="max-h-52 overflow-auto whitespace-pre-wrap text-xs font-mono text-muted-foreground">
                       {formatJsonPreview(selectedDraft.payload)}
                     </pre>
@@ -1452,7 +1735,7 @@ const [forkSaved, setForkSaved] = useState(false);
               <div className="space-y-3">
                 <Card className="shadow-none">
                   <CardHeader>
-                    <CardTitle className="text-base">Path context</CardTitle>
+                    <CardTitle className="text-base">Why this handoff matters</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3 text-sm text-muted-foreground">
                     <div>
@@ -1487,10 +1770,10 @@ const [forkSaved, setForkSaved] = useState(false);
                     <Button
                       onClick={() => {
                         setMessageOverlayOpen(false);
-                        openForkDialog();
+                        openForkDialog(selectedMessage, selectedDraft);
                       }}
                     >
-                      Save draft from this message
+                      Try a fix from this message
                     </Button>
                   </CardContent>
                 </Card>

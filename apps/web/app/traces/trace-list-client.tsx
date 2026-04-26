@@ -3,7 +3,8 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, ArrowRight, CheckCircle2, Loader2, Search, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, Info, Loader2, Search, Sparkles, X } from "lucide-react";
+import { setCookieValue } from "@/lib/project-cookie";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -82,6 +83,17 @@ export function TraceListClient({
   const [query, setQuery] = useState(initialMode ?? "");
   const [status, setStatus] = useState("all");
   const [framework, setFramework] = useState("all");
+
+  // Dismissable MAST taxonomy hint — reads from a cookie so it stays gone after first dismiss.
+  const MAST_HINT_COOKIE = "rifft_mast_hint_dismissed";
+  const [showMastHint, setShowMastHint] = useState(() => {
+    if (typeof document === "undefined") return false;
+    return !document.cookie.split(";").some((c) => c.trim().startsWith(`${MAST_HINT_COOKIE}=`));
+  });
+  const dismissMastHint = () => {
+    setCookieValue(MAST_HINT_COOKIE, "1", 60 * 60 * 24 * 365);
+    setShowMastHint(false);
+  };
   const frameworks = useMemo(
     () => [...new Set(traces.flatMap((trace) => trace.framework))].sort((left, right) => left.localeCompare(right)),
     [traces],
@@ -107,7 +119,7 @@ export function TraceListClient({
   );
   const canLoadMore = traces.length < total;
 
-  const firstIncident = filtered.find((trace) => trace.status === "error" || trace.mast_failures.length > 0) ?? filtered[0] ?? null;
+  const firstIncident = filtered.find((trace) => trace.status === "error" || trace.mast_failures.length > 0) ?? null;
 
   return (
     <TooltipProvider>
@@ -210,6 +222,28 @@ export function TraceListClient({
           ) : null}
         </CardHeader>
       </Card>
+
+      {showMastHint ? (
+        <div className="stagger-1 section-fade flex items-start justify-between gap-4 rounded-2xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+          <div className="flex items-start gap-3">
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <span>
+              Failure badges use the{" "}
+              <span className="font-medium text-foreground">UC Berkeley MAST taxonomy</span>{" "}
+              — 14 standardised failure modes covering things like tool call hallucinations, dropped agent handoffs, and context window overflows.{" "}
+              <span className="font-medium text-foreground">Hover any badge</span> to see what it means and how to fix it.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={dismissMastHint}
+            aria-label="Dismiss hint"
+            className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : null}
 
       <div className="stagger-1 section-fade grid gap-4">
         {filtered.length === 0 ? (

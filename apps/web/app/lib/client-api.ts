@@ -1,5 +1,14 @@
 import type { ForkDraft, TraceBaseline, TraceSummary } from "./api-types";
 
+type ReplayResult = {
+  runId: string;
+  status: "passed" | "failed";
+  headline?: string;
+  error?: string;
+  source_trace_id?: string | null;
+  source_span_id?: string | null;
+};
+
 const apiBaseUrl =
   process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -25,6 +34,31 @@ export const saveForkDraft = (traceId: string, spanId: string, payload: unknown)
       "content-type": "application/json",
     },
     body: JSON.stringify({ payload }),
+  });
+
+export const replayFromSpan = (traceId: string, spanId: string, payload: unknown) =>
+  fetch(`/api/traces/${traceId}/replay/${spanId}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    credentials: "include",
+    cache: "no-store",
+    body: JSON.stringify({ payload }),
+  }).then(async (response) => {
+    const body = (await response.json().catch(() => ({}))) as Partial<ReplayResult> & {
+      message?: string;
+    };
+
+    if (body.runId && (body.status === "passed" || body.status === "failed")) {
+      return body as ReplayResult;
+    }
+
+    if (!response.ok) {
+      throw new Error(body.message ?? body.error ?? `Failed to replay from span: ${response.status}`);
+    }
+
+    throw new Error("Replay hook returned an unexpected response.");
   });
 
 export const setProjectBaseline = (traceId: string) =>

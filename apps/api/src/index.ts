@@ -1,4 +1,6 @@
 import Fastify from "fastify";
+import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
 import Stripe from "stripe";
 import type { FastifyRequest } from "fastify";
 import { pathToFileURL } from "node:url";
@@ -502,17 +504,21 @@ const generateFailureExplanationWithAnthropic = async (
     throw new Error("no_fatal_failure");
   }
 
-  const systemPrompt = `You are Rifft, an AI observability assistant that diagnoses multi-agent pipeline failures.
+  const systemPrompt = `You are Rifft, a calm debugging partner for developers fixing multi-agent pipeline failures.
 
-Your task: explain WHY a failure happened, tracing the causal chain — not just WHAT label was applied.
+Your task: explain the failure in plain human language so the developer knows what to inspect, what changed, and what to try next.
 
 Rules:
 - Produce ONLY strict JSON. No prose, no markdown, no code fences.
 - Do NOT invent facts not present in the trace context.
-- When token counts, costs, durations, model names, or error messages are present in the context, you MUST cite them with their exact values — not paraphrased.
-- Trace the causal chain: if one agent produced output that caused a downstream agent to fail, name both agents and the connection explicitly.
+- Write like a senior engineer explaining the bug to a teammate. Use short, direct sentences.
+- Avoid product jargon in the summary. Do not use terms like "MAST", "causal chain", "fatal failure", "originating", "propagated", or "downstream" unless there is no clearer wording.
+- Focus the summary on the user-visible story: the bad message, who sent it, who trusted it, and why the run failed.
+- Mention internal failure mode names only in evidence, not in the summary.
+- When token counts, costs, durations, model names, or error messages are useful, cite exact values in evidence or key_stats rather than forcing them into the summary.
+- If one agent produced output that caused another agent to fail, name both agents and describe the handoff explicitly.
 - If an agent's max_input_tokens_single_call approaches or exceeds its context_limit, flag this as a likely cause.
-- If error_messages are present, quote them verbatim (truncated to ~80 chars if long).
+- If error_messages are present, quote them verbatim in evidence (truncated to ~80 chars if long).
 - If a payload preview is marked as truncated, note that rather than assuming what it contained.`;
 
   const userPrompt = `Analyze this trace context and explain the fatal failure for a developer who needs to fix their agent pipeline right now.
@@ -527,9 +533,9 @@ Return strict JSON with exactly this shape:
 }
 
 Field rules:
-- summary: one paragraph ≤130 words. Name the failing agent, the MAST failure mode, the upstream cause if one exists, and the concrete impact. Cite at least one specific number from the trace (tokens, cost, duration, etc.).
+- summary: 2–4 short sentences, ≤90 words total. Explain what went wrong in human debugging language. Say what the developer should inspect first. Do not include acronyms or internal labels.
 - evidence: 2–4 items. EACH item must reference a specific agent ID, span attribute value, token count, cost figure, model name, error message, or payload excerpt from the context. No generic statements like "the agent failed" — cite the data.
-- recommended_fix: one concrete engineering change ≤70 words. Tailor it to the evidence: if tokens overflow, name a specific limit; if bad output propagated, suggest a validation layer at the specific handoff; if a tool call failed, suggest retry logic or a fallback.
+- recommended_fix: one concrete engineering change ≤70 words. Start with an imperative verb. Tailor it to the evidence: if tokens overflow, name a specific limit; if a bad message was trusted, suggest a validation layer at the specific handoff; if a tool call failed, suggest retry logic or a fallback.
 - confidence: "low" if key attributes are null, payloads are heavily truncated, or the causal chain is ambiguous.
 - key_stats: exactly 2–3 objects. Pick the most diagnostically important quantitative facts from this trace. Use "ok" for values in normal range, "warning" for elevated but not catastrophic, "critical" for values that directly contributed to the failure. Examples: input token count vs context limit, total cost, agent duration, error count.
 
@@ -662,7 +668,35 @@ type AppDeps = {
 export const createApp = (
   deps: Partial<AppDeps> = {},
 ) => {
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: process.env.NODE_ENV !== "test" });
+
+  // CORS — only allow requests from the configured app origin.
+  // Set ALLOWED_ORIGIN to a comma-separated list of origins in production.
+  const allowedOrigins = (process.env.ALLOWED_ORIGIN ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!allowedOrigins.includes("http://localhost:3000")) {
+    allowedOrigins.push("http://localhost:3000");
+  }
+  void app.register(cors, {
+    origin: allowedOrigins,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    credentials: true,
+  });
+
+  // Rate limiting — 200 requests per minute per IP globally.
+  // Individual routes can override with their own `config.rateLimit`.
+  void app.register(rateLimit, {
+    global: true,
+    max: 200,
+    timeWindow: "1 minute",
+    errorResponseBuilder: (_request, context) => ({
+      error: "rate_limit_exceeded",
+      message: `Too many requests — retry after ${context.after}.`,
+      expiresIn: context.ttl,
+    }),
+  });
   const resolvedDeps: AppDeps = {
     getAuthenticatedUser,
     getAccessibleProject,
