@@ -46,6 +46,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Build sdk-js first so packages that depend on it have types available
+      - run: pnpm --filter @rifft-dev/rifft build
+
       - run: pnpm lint
 
   test:
