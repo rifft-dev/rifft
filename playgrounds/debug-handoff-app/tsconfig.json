@@ -3,6 +3,7 @@
   "compilerOptions": {
     "noEmit": true,
     "ignoreDeprecations": "6.0",
+    "types": ["node"],
     "baseUrl": ".",
     "paths": {
       "@rifft-dev/rifft": ["../../packages/sdk-js/src/index.ts"]
