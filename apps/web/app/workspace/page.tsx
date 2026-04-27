@@ -180,7 +180,9 @@ export default async function WorkspacePage() {
                     <Badge variant="outline">{formatRelative(latestFailingTrace.started_at)}</Badge>
                   </div>
                   <div className="mt-2 text-xs text-muted-foreground">
-                    {latestFailingTrace.mast_failures[0]?.mode ?? latestFailingTrace.status}
+                    {latestFailingTrace.mast_failures[0]
+                      ? getMastMeta(latestFailingTrace.mast_failures[0].mode).label
+                      : latestFailingTrace.status}
                   </div>
                 </>
               ) : (
@@ -330,12 +332,12 @@ export default async function WorkspacePage() {
                       <div className="mt-2 flex flex-wrap gap-2">
                         {latestFailingComparison.failure_modes.new_modes.slice(0, 2).map((mode) => (
                           <Badge key={mode} variant="destructive">
-                            {mode}
+                            {getMastMeta(mode).label}
                           </Badge>
                         ))}
                         {latestFailingComparison.failure_modes.resolved_modes.slice(0, 1).map((mode) => (
                           <Badge key={mode} variant="secondary">
-                            Resolved: {mode}
+                            Resolved: {getMastMeta(mode).label}
                           </Badge>
                         ))}
                       </div>
@@ -572,7 +574,7 @@ export default async function WorkspacePage() {
                         key={`${trace.trace_id}-${failure.mode}`}
                         variant={failure.severity === "fatal" ? "destructive" : "outline"}
                       >
-                        {failure.mode}
+                        {getMastMeta(failure.mode).label}
                       </Badge>
                     ))}
                   </div>

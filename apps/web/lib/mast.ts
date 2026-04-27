@@ -12,7 +12,8 @@ export type MastMode =
   | "missing_output_validation"
   | "hallucinated_tool_result"
   | "cost_overrun"
-  | "timeout_exceeded";
+  | "timeout_exceeded"
+  | "prompt_injection";
 
 export type MastMeta = {
   label: string;
@@ -90,6 +91,11 @@ export const MAST_LABELS: Record<MastMode, MastMeta> = {
     label: "Timeout exceeded",
     explanation: "This agent or trace step ran longer than the project's configured time budget.",
     recommendedFix: "Shorten the step, add early exits, or raise the timeout threshold only if the longer runtime is expected.",
+  },
+  prompt_injection: {
+    label: "Prompt injection",
+    explanation: "External content in the agent's input attempted to override its instructions or escalate privileges.",
+    recommendedFix: "Sanitize or fence untrusted content before including it in agent prompts, and validate that system instructions were not overridden.",
   },
 };
 

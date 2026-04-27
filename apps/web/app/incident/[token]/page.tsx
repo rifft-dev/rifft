@@ -219,15 +219,15 @@ export default async function IncidentPage({
                   }
                 >
                   {comparison.verdict === "improved"
-                    ? "Improved vs baseline"
+                    ? "Improved vs reference run"
                     : comparison.verdict === "regressed"
-                      ? "Regressed vs baseline"
+                      ? "Regressed vs reference run"
                       : comparison.verdict === "same"
-                        ? "Same as baseline"
-                        : "Changed vs baseline"}
+                        ? "Same as reference run"
+                        : "Changed vs reference run"}
                 </Badge>
                 {comparison.baseline ? (
-                  <Badge variant="outline">Baseline {comparison.baseline.trace_id}</Badge>
+                  <Badge variant="outline">Reference: {comparison.baseline.trace_id}</Badge>
                 ) : null}
               </div>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -261,12 +261,12 @@ export default async function IncidentPage({
                   <div className="mt-2 flex flex-wrap gap-2">
                     {comparison.failure_modes.new_modes.slice(0, 2).map((mode: string) => (
                       <Badge key={mode} variant="destructive">
-                        New: {mode}
+                        New: {getMastMeta(mode).label}
                       </Badge>
                     ))}
                     {comparison.failure_modes.resolved_modes.slice(0, 2).map((mode: string) => (
                       <Badge key={mode} variant="secondary">
-                        Fixed: {mode}
+                        Fixed: {getMastMeta(mode).label}
                       </Badge>
                     ))}
                     {comparison.failure_modes.new_modes.length === 0 &&

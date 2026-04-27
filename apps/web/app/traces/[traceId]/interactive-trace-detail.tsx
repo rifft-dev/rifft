@@ -52,6 +52,7 @@ import { replayFromSpan, saveForkDraft as persistForkDraft } from "../../lib/cli
 import { formatCurrency } from "@/lib/utils";
 import type { AgentDetail, AgentFailureDiffResult, ForkDraft, TraceDetail, TraceGraph, TraceLiveSnapshot, TraceTimeline } from "../../lib/api-types";
 import { FailureExplanationCard } from "./failure-explanation-card";
+import { getMastMeta } from "@/lib/mast";
 
 type AgentRecord = {
   agentId: string;
@@ -75,7 +76,7 @@ type LiveState = {
   sessionExpired?: boolean;
 };
 
-type AgentNodeData = TraceGraph["nodes"][number] & { mastFailureCount: number };
+type AgentNodeData = TraceGraph["nodes"][number] & { mastFailureCount: number; mastFailureModes: string[] };
 
 const GRAPH_NODE_WIDTH = 220;
 const GRAPH_NODE_HEIGHT = 132;
@@ -326,33 +327,42 @@ function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData>>) {
         ? "border-destructive"
         : "border-border";
 
+  const card = (
+    <Card className={`min-w-48 bg-card/95 shadow-sm ${borderClass} ${selected ? "ring-2 ring-ring" : ""}`}>
+      <Handle type="target" position={Position.Left} className="!h-3 !w-3 !border-background !bg-muted-foreground" />
+      <CardHeader className="space-y-2 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="font-mono text-sm">{data.id}</CardTitle>
+          <Badge variant="outline">{data.framework}</Badge>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant={statusVariant(data.status)}>{data.status}</Badge>
+          {data.root_cause ? <Badge variant="destructive">Root cause</Badge> : null}
+          {data.mastFailureCount > 0 ? (
+            <Badge variant="outline">
+              {data.mastFailureCount} {data.mastFailureCount === 1 ? "failure" : "failures"}
+            </Badge>
+          ) : null}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-1 p-3 pt-0 text-xs text-muted-foreground">
+        <div>{formatCurrency(data.cost_usd)}</div>
+        <div>{data.duration_ms}ms</div>
+      </CardContent>
+      <Handle type="source" position={Position.Right} className="!h-3 !w-3 !border-background !bg-muted-foreground" />
+    </Card>
+  );
+
+  if (data.mastFailureModes.length === 0) return <TooltipProvider>{card}</TooltipProvider>;
+
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger asChild>
-          <Card className={`min-w-48 bg-card/95 shadow-sm ${borderClass} ${selected ? "ring-2 ring-ring" : ""}`}>
-            <Handle type="target" position={Position.Left} className="!h-3 !w-3 !border-background !bg-muted-foreground" />
-            <CardHeader className="space-y-2 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <CardTitle className="font-mono text-sm">{data.id}</CardTitle>
-                <Badge variant="outline">{data.framework}</Badge>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Badge variant={statusVariant(data.status)}>{data.status}</Badge>
-                {data.root_cause ? <Badge variant="destructive">Root cause</Badge> : null}
-                {data.mastFailureCount > 0 ? <Badge variant="outline">{data.mastFailureCount} MAST</Badge> : null}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-1 p-3 pt-0 text-xs text-muted-foreground">
-              <div>{formatCurrency(data.cost_usd)}</div>
-              <div>{data.duration_ms}ms</div>
-            </CardContent>
-            <Handle type="source" position={Position.Right} className="!h-3 !w-3 !border-background !bg-muted-foreground" />
-          </Card>
-        </TooltipTrigger>
-        <TooltipContent side="top">
-          <p>{data.id}</p>
-          <p>{data.framework}</p>
+        <TooltipTrigger asChild>{card}</TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs space-y-1">
+          {data.mastFailureModes.map((label) => (
+            <p key={label} className="text-xs">{label}</p>
+          ))}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -617,6 +627,9 @@ export function InteractiveTraceDetail({
         data: {
           ...node,
           mastFailureCount: trace.mast_failures.filter((failure) => failure.agent_id === node.id).length,
+          mastFailureModes: trace.mast_failures
+            .filter((failure) => failure.agent_id === node.id)
+            .map((failure) => getMastMeta(failure.mode).label),
         },
         width: GRAPH_NODE_WIDTH,
         height: GRAPH_NODE_HEIGHT,
@@ -874,7 +887,7 @@ export function InteractiveTraceDetail({
                         First bad handoff
                       </div>
                       <div className="font-mono text-sm">
-                        {focusMessage.source_agent_id} {"->"} {focusMessage.target_agent_id}
+                        {focusMessage.source_agent_id} {"→"} {focusMessage.target_agent_id}
                       </div>
                       <p className="max-w-2xl text-sm text-muted-foreground">
                         Start here. This is the earliest recorded message in the replay path, so it is the best place to inspect where the conversation first drifted.
@@ -976,7 +989,7 @@ export function InteractiveTraceDetail({
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="inline-block h-3 w-3 shrink-0 rounded-sm border-2 border-yellow-500" />
-                          Has MAST failures
+                          Has failures
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="inline-block h-3 w-3 shrink-0 rounded-sm border-2 border-border" />
@@ -1034,6 +1047,10 @@ export function InteractiveTraceDetail({
                     <div className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-2xl border bg-background/90 p-2 shadow-lg backdrop-blur">
                       {replayMode ? (
                         <>
+                          <span className="px-2 text-xs text-muted-foreground hidden sm:inline">
+                            Stepping through agent handoffs
+                          </span>
+                          <div className="hidden sm:block h-4 w-px bg-border" />
                           <Button variant="outline" disabled={!canStepReplayBack} onClick={() => stepReplay(-1)}>
                             Step back
                           </Button>
@@ -1045,13 +1062,13 @@ export function InteractiveTraceDetail({
                             Try a fix
                           </Button>
                           <Button variant="ghost" onClick={() => setReplayMode(false)}>
-                            Exit step-through
+                            Exit
                           </Button>
                         </>
                       ) : (
                         <Button onClick={enterReplayMode}>
                           <Play className="h-4 w-4" />
-                          {replaySpans.length === 1 ? "Inspect conversation" : "Follow conversation"}
+                          Step through messages
                         </Button>
                       )}
                     </div>
@@ -1166,7 +1183,7 @@ export function InteractiveTraceDetail({
                               >
                                 <div className="flex items-center justify-between gap-2">
                                   <span className={`font-mono text-xs ${isRelated ? "text-foreground" : ""}`}>
-                                    {span.source_agent_id} {"->"} {span.target_agent_id}
+                                    {span.source_agent_id} {"→"} {span.target_agent_id}
                                   </span>
                                   <Badge variant="outline">{span.duration_ms}ms</Badge>
                                 </div>
@@ -1206,7 +1223,7 @@ export function InteractiveTraceDetail({
                     </div>
                     <div className="rounded-2xl border bg-muted/20 p-4">
                       <div className="text-sm font-medium">
-                        {focusMessage.source_agent_id} {"->"} {focusMessage.target_agent_id}
+                        {focusMessage.source_agent_id} {"→"} {focusMessage.target_agent_id}
                       </div>
                       <p className="mt-2 text-sm text-muted-foreground">
                         {selectedMessage
@@ -1292,7 +1309,7 @@ export function InteractiveTraceDetail({
                   selectedPathFailures.map((failure) => (
                     <div key={`${failure.mode}-${failure.agent_id ?? "trace"}`} className="rounded-2xl border p-4">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium">{failure.mode}</span>
+                        <span className="text-sm font-medium">{getMastMeta(failure.mode).label}</span>
                         <Badge variant={failure.severity === "fatal" ? "destructive" : "outline"}>
                           {failure.severity}
                         </Badge>
@@ -1345,7 +1362,7 @@ export function InteractiveTraceDetail({
               >
                 <TabsList className="mx-6 mt-4 w-auto justify-start rounded-xl">
                   <TabsTrigger value="messages">
-                    Saw
+                    Messages
                     {selectedAgent.messages.length > 0 ? (
                       <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">
                         {selectedAgent.messages.length}
@@ -1368,19 +1385,20 @@ export function InteractiveTraceDetail({
                       </span>
                     ) : null}
                   </TabsTrigger>
-                  {selectedAgent.decision_context ? (
-                    <TabsTrigger value="context">Decisions</TabsTrigger>
-                  ) : null}
-                  {agentDiffByAgent.has(selectedAgent.summary.agent_id) ? (
-                    <TabsTrigger value="history">History</TabsTrigger>
-                  ) : null}
+                  <TabsTrigger value="context">Decisions</TabsTrigger>
+                  <TabsTrigger value="history">History</TabsTrigger>
                 </TabsList>
                 <ScrollArea className="flex-1">
                   <TabsContent value="messages" className="mt-0 px-6 py-4">
                     {selectedAgent.messages.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        No incoming or outgoing handoffs were recorded for this agent.
-                      </p>
+                      <div className="space-y-2">
+                        <p className="text-sm text-muted-foreground">
+                          No handoffs recorded for this agent.
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          This is expected for single-agent traces or for agents at the edge of a pipeline. If you expected cross-agent messages here, check that your SDK is propagating trace context across agent boundaries.
+                        </p>
+                      </div>
                     ) : (
                       <div className="space-y-3">
                         {selectedAgent.messages.map((message) => (
@@ -1392,7 +1410,7 @@ export function InteractiveTraceDetail({
                           >
                             <div className="flex items-center justify-between gap-2">
                               <span className="font-mono text-xs">
-                                {message.sender} {"->"} {message.receiver}
+                                {message.sender} {"→"} {message.receiver}
                               </span>
                               <Badge variant="outline">{message.protocol}</Badge>
                             </div>
@@ -1431,7 +1449,7 @@ export function InteractiveTraceDetail({
                         {selectedAgent.mast_failures.map((failure) => (
                           <div key={failure.mode} className="rounded-lg border p-3">
                             <div className="flex items-center justify-between gap-2">
-                              <span className="text-sm font-medium">{failure.mode}</span>
+                              <span className="text-sm font-medium">{getMastMeta(failure.mode).label}</span>
                               <Badge variant={failure.severity === "fatal" ? "destructive" : "outline"}>
                                 {failure.severity}
                               </Badge>
@@ -1442,16 +1460,35 @@ export function InteractiveTraceDetail({
                       </div>
                     )}
                   </TabsContent>
-                 {selectedAgent.decision_context ? (
-                    <TabsContent value="context" className="mt-0 px-6 py-4">
+                  <TabsContent value="context" className="mt-0 px-6 py-4">
+                    {selectedAgent.decision_context ? (
                       <pre className="whitespace-pre-wrap text-xs font-mono text-muted-foreground">
                         {formatJsonPreview(selectedAgent.decision_context)}
                       </pre>
-                    </TabsContent>
-                  ) : null}
+                    ) : (
+                      <div className="space-y-3">
+                        <p className="text-sm text-muted-foreground">
+                          No decision context recorded for this agent.
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Decision context captures the reasoning behind key agent choices — which tool to call next, why a subtask was delegated, or what shaped a final answer. It's available for LangChain, LangGraph, CrewAI, and any framework that supports custom span attributes.
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Emit it via the <span className="font-mono text-xs bg-muted px-1 py-0.5 rounded">rifft.decision()</span> SDK call, or set the <span className="font-mono text-xs bg-muted px-1 py-0.5 rounded">gen_ai.decision_context</span> span attribute directly.{" "}
+                          <a href="/docs#decision-context" className="underline underline-offset-4 hover:text-foreground">See the docs →</a>
+                        </p>
+                      </div>
+                    )}
+                  </TabsContent>
                   {(() => {
                     const diff = agentDiffByAgent.get(selectedAgent.summary.agent_id);
-                    if (!diff) return null;
+                    if (!diff) return (
+                      <TabsContent value="history" className="mt-0 px-6 py-4">
+                        <p className="text-sm text-muted-foreground">
+                          No historical data yet for this agent. Once this agent has run across multiple traces, Rifft will show its 30-day activation count, fatal failure rate, and how token usage and duration differ between passing and failing runs.
+                        </p>
+                      </TabsContent>
+                    );
                     const fmtTokens = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
                     const fmtMs = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}s` : `${Math.round(n)}ms`;
                     const total = diff.fatal_activations + diff.successful_activations;
@@ -1673,7 +1710,7 @@ export function InteractiveTraceDetail({
               </div>
             ) : forkSaved ? (
               <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
-                Payload saved. Use it with your replay hook or rerun command, then open the new trace to see whether the fix held.
+                Draft saved to this span. Reopen "Edit &amp; replay payload" on this message to find it again, or pass it to your replay hook to rerun the agent.
               </div>
             ) : replayResult ? (
               <div
@@ -1744,7 +1781,7 @@ export function InteractiveTraceDetail({
               </Button>
             ) : null}
             <Button onClick={saveFork} disabled={!parsedForkPayload.valid}>
-              Save for later
+              Save draft
             </Button>
           </div>
         </DialogContent>
@@ -1756,7 +1793,7 @@ export function InteractiveTraceDetail({
             <DialogTitle>Handoff detail</DialogTitle>
             <DialogDescription>
               {selectedMessage
-                ? `${selectedMessage.source_agent_id} -> ${selectedMessage.target_agent_id}`
+                ? `${selectedMessage.source_agent_id} → ${selectedMessage.target_agent_id}`
                 : "Select a communication edge to inspect the full payload and context."}
             </DialogDescription>
           </DialogHeader>

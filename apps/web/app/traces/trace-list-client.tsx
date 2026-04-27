@@ -19,6 +19,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { getCloudTraces } from "../lib/client-api";
 import { formatCurrency, formatDuration, getTraceDisplayName, getTraceToneLabels } from "@/lib/utils";
+import { getMastMeta } from "@/lib/mast";
 import type { TraceSummary } from "../lib/api-types";
 
 const formatRelative = (value: string) => {
@@ -80,7 +81,7 @@ export function TraceListClient({
   const [isPending, startTransition] = useTransition();
   const [traces, setTraces] = useState(initialTraces);
   const [loadedPage, setLoadedPage] = useState(1);
-  const [query, setQuery] = useState(initialMode ?? "");
+  const [query, setQuery] = useState(initialMode ? getMastMeta(initialMode).label : "");
   const [status, setStatus] = useState("all");
   const [framework, setFramework] = useState("all");
 
@@ -108,7 +109,8 @@ export function TraceListClient({
             trace.trace_id.toLowerCase().includes(query.toLowerCase()) ||
             trace.framework.some((item) => item.toLowerCase().includes(query.toLowerCase())) ||
             trace.mast_failures.some((failure) =>
-              failure.mode.toLowerCase().includes(query.toLowerCase()),
+              failure.mode.toLowerCase().includes(query.toLowerCase()) ||
+              getMastMeta(failure.mode).label.toLowerCase().includes(query.toLowerCase()),
             );
           const matchesStatus = status === "all" || trace.status === status;
           const matchesFramework = framework === "all" || trace.framework.includes(framework);
@@ -120,6 +122,32 @@ export function TraceListClient({
   const canLoadMore = traces.length < total;
 
   const firstIncident = filtered.find((trace) => trace.status === "error" || trace.mast_failures.length > 0) ?? null;
+
+  if (total === 0) {
+    return (
+      <Card className="section-fade rounded-[2rem] border shadow-sm">
+        <CardContent className="flex flex-col items-center gap-4 py-16 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted">
+            <Search className="h-6 w-6 text-muted-foreground" />
+          </div>
+          <div className="space-y-1">
+            <div className="text-lg font-medium">No traces yet</div>
+            <p className="max-w-sm text-sm text-muted-foreground">
+              Rifft receives traces over OTLP. Point your agent framework at the collector and your runs will appear here automatically.
+            </p>
+          </div>
+          <div className="flex flex-wrap justify-center gap-3">
+            <Button asChild>
+              <Link href="/docs#quickstart">Read the quickstart</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/docs#sdks">Browse SDK guides</Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <TooltipProvider>
@@ -170,12 +198,12 @@ export function TraceListClient({
             </Select>
           </div>
 
-          {initialMode && query === initialMode ? (
+          {initialMode && query === getMastMeta(initialMode).label ? (
             <div className="flex items-center justify-between gap-4 rounded-2xl border border-chart-1/25 bg-chart-1/5 px-4 py-3 text-sm">
               <span className="text-muted-foreground">
                 Showing traces with failure mode{" "}
                 <span className="font-medium text-foreground">
-                  {initialMode.replaceAll("_", " ")}
+                  {getMastMeta(initialMode ?? "").label}
                 </span>
               </span>
               <button
@@ -202,11 +230,11 @@ export function TraceListClient({
                     <Tooltip key={`${firstIncident.trace_id}-${failure.mode}`}>
                       <TooltipTrigger asChild>
                         <Badge variant={failure.severity === "fatal" ? "destructive" : "outline"}>
-                          {failure.mode}
+                          {getMastMeta(failure.mode).label}
                         </Badge>
                       </TooltipTrigger>
                       <TooltipContent side="top" className="max-w-xs text-sm">
-                        {failure.explanation}
+                        {getMastMeta(failure.mode).explanation}
                       </TooltipContent>
                     </Tooltip>
                   ))}
@@ -230,7 +258,7 @@ export function TraceListClient({
             <span>
               Failure badges use the{" "}
               <span className="font-medium text-foreground">UC Berkeley MAST taxonomy</span>{" "}
-              — 14 standardised failure modes covering things like tool call hallucinations, dropped agent handoffs, and context window overflows.{" "}
+              — 15 standardised failure modes covering things like tool call hallucinations, dropped agent handoffs, and context window overflows.{" "}
               <span className="font-medium text-foreground">Hover any badge</span> to see what it means and how to fix it.
             </span>
           </div>
@@ -319,11 +347,11 @@ export function TraceListClient({
                           >
                             <TooltipTrigger asChild>
                               <Badge variant={failure.severity === "fatal" ? "destructive" : "outline"}>
-                                {failure.mode}
+                                {getMastMeta(failure.mode).label}
                               </Badge>
                             </TooltipTrigger>
                             <TooltipContent side="top" className="max-w-xs text-sm">
-                              {failure.explanation}
+                              {getMastMeta(failure.mode).explanation}
                             </TooltipContent>
                           </Tooltip>
                         ))}

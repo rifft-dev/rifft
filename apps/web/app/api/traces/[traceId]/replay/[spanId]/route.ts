@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 const replayHookUrl = process.env.RIFFT_REPLAY_HOOK_URL ?? "http://localhost:8787/rifft/replay";
@@ -6,6 +7,13 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ traceId: string; spanId: string }> },
 ) {
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get("rifft_access_token")?.value ?? "";
+
+  if (!accessToken) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
   const { traceId, spanId } = await context.params;
   const body = (await request.json().catch(() => null)) as { payload?: unknown } | null;
 

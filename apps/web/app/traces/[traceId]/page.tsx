@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AlertTriangle, ArrowLeft, GitBranch } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, GitBranch } from "lucide-react";
 import {
   getAgentDetail,
   getProjectSettings,
@@ -10,6 +10,7 @@ import {
   getTraceSnapshot,
 } from "../../lib/api";
 import { Badge } from "@/components/ui/badge";
+import { getMastMeta } from "@/lib/mast";
 import { Button } from "@/components/ui/button";
 import { InteractiveTraceDetail } from "./interactive-trace-detail";
 import { SetBaselineButton } from "./set-baseline-button";
@@ -114,7 +115,10 @@ export default async function TraceDetailPage({
     ).flat();
     const rootCauseAgent = trace.causal_attribution.root_cause_agent_id ?? "Not inferred";
     const failingAgent = trace.causal_attribution.failing_agent_id ?? "Not inferred";
-    const primaryFailure = trace.mast_failures[0]?.mode ?? "No failure detected";
+    const primaryFailureMode = trace.mast_failures[0]?.mode;
+    const primaryFailure = primaryFailureMode
+      ? getMastMeta(primaryFailureMode).label
+      : "No failure detected";
     const comparison = comparisonResponse.comparison;
   const baseline = baselineResponse.baseline;
   const isCurrentBaseline = baseline?.trace_id === trace.trace_id;
@@ -200,20 +204,20 @@ export default async function TraceDetailPage({
                 </Badge>
                 {comparisonData.failure_modes.new_modes.slice(0, 1).map((mode) => (
                   <Badge key={mode} variant="destructive">
-                    New: {mode}
+                    New: {getMastMeta(mode).label}
                   </Badge>
                 ))}
                 {comparisonData.failure_modes.resolved_modes.slice(0, 1).map((mode) => (
                   <Badge key={mode} variant="secondary">
-                    Resolved: {mode}
+                    Resolved: {getMastMeta(mode).label}
                   </Badge>
                 ))}
               </div>
               {comparisonData.baseline?.trace_id ? (
-                <Button asChild variant="ghost" size="sm" className="-ml-3 sm:ml-0">
+                <Button asChild variant="ghost" size="sm">
                   <Link href={`/traces/${comparisonData.baseline.trace_id}`}>
-                    <ArrowLeft className="h-4 w-4" />
-                    Open reference
+                    Open reference run
+                    <ArrowRight className="h-4 w-4" />
                   </Link>
                 </Button>
               ) : null}
@@ -221,9 +225,15 @@ export default async function TraceDetailPage({
           ) : (
             !baseline || isCurrentBaseline ? (
               <div className="mt-6 rounded-2xl border bg-muted/20 p-4 text-sm text-muted-foreground">
-                {!baseline
-                  ? "No reference run selected yet. Pick a healthy run when you want before/after comparisons."
-                  : "This trace is your reference run, so newer runs will be compared against it."}
+                {!baseline ? (
+                  <>
+                    No reference run set yet.{" "}
+                    <span className="text-foreground">Find a healthy run and click "Use as reference run"</span>
+                    {" "}— Rifft will compare every subsequent failure against it to show you what's new, what's resolved, and whether things are getting better or worse.
+                  </>
+                ) : (
+                  "This trace is your reference run, so newer runs will be compared against it."
+                )}
               </div>
             ) : null
           )}

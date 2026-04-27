@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { getTraces } from "../lib/api";
+import { getMastMeta } from "@/lib/mast";
 import { redirectToBootstrap, requireCloudProject } from "../lib/require-cloud-project";
 import { TraceListClient } from "./trace-list-client";
 
@@ -31,7 +32,7 @@ export default async function TracesPage({ searchParams }: TracesPageProps) {
           <Badge variant="outline">{data.total} total traces</Badge>
           {initialMode ? (
             <Badge variant="outline">
-              Filtered: {initialMode.replaceAll("_", " ")}
+              Filtered: {getMastMeta(initialMode).label}
             </Badge>
           ) : null}
         </div>
