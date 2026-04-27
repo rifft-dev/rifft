@@ -235,6 +235,7 @@ export default async function TraceDetailPage({
           graph={graph}
           timeline={timeline}
           trace={trace}
+          replayHookConfigured={!!process.env.RIFFT_REPLAY_HOOK_URL}
         />
       </div>
     );

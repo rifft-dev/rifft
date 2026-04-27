@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, CircleDashed, Copy, Crown, LoaderCircle, Sparkles, Wand2 } from "lucide-react";
+import { CheckCircle2, CircleDashed, Copy, Crown, FlaskConical, LoaderCircle, Sparkles, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -179,6 +179,23 @@ export function FirstTraceOnboarding({
   const [runtime, setRuntime] = useState<RuntimeOption>("python");
   const [packageManager, setPackageManager] = useState<PackageManagerOption>("npm");
   const [framework, setFramework] = useState<FrameworkOption>("crewai");
+  const [isSendingSample, setIsSendingSample] = useState(false);
+
+  const sendSampleTrace = async () => {
+    try {
+      setIsSendingSample(true);
+      const response = await fetch("/api/cloud/sample-trace", { method: "POST" });
+      const data = (await response.json()) as { traceId?: string; error?: string; message?: string };
+      if (!response.ok || !data.traceId) {
+        throw new Error(data.message ?? data.error ?? "Could not send sample trace");
+      }
+      toast.success("Sample trace sent — opening it now");
+      router.push(`/traces/${data.traceId}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not send sample trace");
+      setIsSendingSample(false);
+    }
+  };
   const installSnippet = useMemo(
     () =>
       buildInstallSnippet({
@@ -323,6 +340,35 @@ export function FirstTraceOnboarding({
               Fork and replay any handoff point without restarting your agents
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* Zero-setup preview — lets users see the debugging UI before wiring their own code */}
+      <section className="rounded-[2rem] border border-dashed bg-card/50 p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <FlaskConical className="h-4 w-4 text-muted-foreground" />
+              Don&apos;t have an agent ready yet?
+            </div>
+            <p className="max-w-xl text-sm text-muted-foreground">
+              Send a sample trace right now — a 3-agent content pipeline with a real failure — so you can
+              explore the graph view, root cause panel, and replay feature before connecting your own code.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            disabled={isSendingSample || !project.api_key}
+            onClick={sendSampleTrace}
+            className="shrink-0"
+          >
+            {isSendingSample ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+            ) : (
+              <FlaskConical className="h-4 w-4" />
+            )}
+            {isSendingSample ? "Sending…" : "Try a sample trace"}
+          </Button>
         </div>
       </section>
 

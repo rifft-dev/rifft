@@ -78,7 +78,6 @@ export type ProjectAlerts = {
   regression_available: boolean;
   plan_key: "free" | "pro" | "scale";
   fatal_failures_enabled: boolean;
-  regression_digest_enabled: boolean;
   slack: {
     configured: boolean;
     target: string | null;
@@ -97,7 +96,7 @@ export type ProjectAlerts = {
     id: string;
     project_id: string;
     channel: "slack" | "email";
-    event_type: "fatal_failure" | "test" | "regression_digest";
+    event_type: "fatal_failure" | "test";
     status: "sent" | "failed";
     trace_id: string | null;
     target: string | null;

@@ -65,6 +65,7 @@ type Props = {
   agentDetails: AgentRecord[];
   initialForkDrafts: ForkDraft[];
   canRegenerateFailureExplanation: boolean;
+  replayHookConfigured: boolean;
 };
 
 type LiveState = {
@@ -367,6 +368,7 @@ export function InteractiveTraceDetail({
   agentDetails,
   initialForkDrafts,
   canRegenerateFailureExplanation,
+  replayHookConfigured,
 }: Props) {
   const [trace, setTrace] = useState<TraceDetail>(initialTrace);
   const [graph, setGraph] = useState<TraceGraph>(initialGraph);
@@ -389,6 +391,7 @@ export function InteractiveTraceDetail({
     status: "passed" | "failed";
     headline?: string;
     error?: string;
+    source_trace_id?: string | null;
   } | null>(null);
   const [forkOriginalPayload, setForkOriginalPayload] = useState("");
   const [tokenLimitInput, setTokenLimitInput] = useState("");
@@ -963,6 +966,27 @@ export function InteractiveTraceDetail({
                         </Badge>
                       ) : null}
                     </div>
+
+                    {/* Graph legend — top-right corner */}
+                    {graph.edges.length > 0 ? (
+                      <div className="pointer-events-none absolute right-4 top-4 z-10 flex flex-col gap-1.5 rounded-2xl border bg-background/90 px-3 py-2.5 text-xs text-muted-foreground shadow backdrop-blur">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-block h-3 w-3 shrink-0 rounded-sm border-2 border-destructive" />
+                          Root cause agent
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="inline-block h-3 w-3 shrink-0 rounded-sm border-2 border-yellow-500" />
+                          Has MAST failures
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="inline-block h-3 w-3 shrink-0 rounded-sm border-2 border-border" />
+                          Healthy
+                        </div>
+                        <div className="mt-0.5 border-t pt-1.5 text-[10px]">
+                          Click a node or arrow to inspect
+                        </div>
+                      </div>
+                    ) : null}
                     {graph.edges.length === 0 ? (
                       <div className="flex h-full flex-col items-center justify-center gap-4 px-8 text-center">
                         <div className="rounded-2xl border border-dashed bg-muted/20 p-8">
@@ -1499,9 +1523,9 @@ export function InteractiveTraceDetail({
       <Dialog open={forkOpen} onOpenChange={(open) => { setForkOpen(open); if (!open) { setForkSaved(false); setForkOriginalPayload(""); setTokenLimitInput(""); setModelOverrideInput(""); setReplayResult(null); } }}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Try a fix</DialogTitle>
+            <DialogTitle>Edit &amp; replay payload</DialogTitle>
             <DialogDescription>
-              Edit the message payload you want to replay from this point. Rifft saves it here so you can use it with your replay hook or rerun command.
+              Edit the payload below, then save it for later use with your own tooling, or run it through your replay hook now to see whether the fix holds.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -1649,7 +1673,7 @@ export function InteractiveTraceDetail({
               </div>
             ) : forkSaved ? (
               <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
-                Replay payload saved. Use it with your replay hook or rerun command, then open the new trace to see whether the fix held.
+                Payload saved. Use it with your replay hook or rerun command, then open the new trace to see whether the fix held.
               </div>
             ) : replayResult ? (
               <div
@@ -1659,12 +1683,37 @@ export function InteractiveTraceDetail({
                     : "border-destructive/30 bg-destructive/10 text-destructive"
                 }`}
               >
-                Replay {replayResult.status}. New run: <span className="font-mono">{replayResult.runId}</span>
-                {replayResult.error ? <span> · {replayResult.error}</span> : null}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    Replay {replayResult.status}
+                    {replayResult.error ? <span> · {replayResult.error}</span> : null}
+                  </span>
+                  {replayResult.source_trace_id ? (
+                    <a
+                      href={`/traces/${replayResult.source_trace_id}`}
+                      className="font-medium underline underline-offset-4"
+                    >
+                      View replay trace →
+                    </a>
+                  ) : (
+                    <span className="font-mono text-xs opacity-70">{replayResult.runId}</span>
+                  )}
+                </div>
+              </div>
+            ) : !replayHookConfigured ? (
+              <div className="rounded-xl border bg-muted/30 px-4 py-3 space-y-2">
+                <div className="text-sm font-medium">Set up a replay hook to run fixes live</div>
+                <p className="text-sm text-muted-foreground">
+                  Set <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">RIFFT_REPLAY_HOOK_URL</code> to an endpoint on your infrastructure. Rifft will POST to it and wait for a result.
+                </p>
+                <pre className="overflow-x-auto rounded-lg bg-muted/50 p-3 font-mono text-xs text-muted-foreground">{`// Request\nPOST $RIFFT_REPLAY_HOOK_URL\n{ "trace_id": "...", "span_id": "...", "payload": { ... } }\n\n// Response\n{ "runId": "...", "status": "passed" | "failed", "source_trace_id"?: "..." }`}</pre>
+                <p className="text-xs text-muted-foreground">
+                  You can still save the payload below and replay it with your own tooling.
+                </p>
               </div>
             ) : (
               <div className="text-sm text-muted-foreground">
-                Rifft will keep this replay payload attached to the selected message.
+                Rifft will keep this payload attached to the selected message.
               </div>
             )}
           </div>
@@ -1684,16 +1733,18 @@ export function InteractiveTraceDetail({
             <Button variant="ghost" onClick={() => setForkOpen(false)}>
               Cancel
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => void replayCurrentPayload()}
-              disabled={!parsedForkPayload.valid || isReplaying}
-            >
-              {isReplaying ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Replay from here
-            </Button>
+            {replayHookConfigured ? (
+              <Button
+                variant="outline"
+                onClick={() => void replayCurrentPayload()}
+                disabled={!parsedForkPayload.valid || isReplaying}
+              >
+                {isReplaying ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Run replay
+              </Button>
+            ) : null}
             <Button onClick={saveFork} disabled={!parsedForkPayload.valid}>
-              Save replay payload
+              Save for later
             </Button>
           </div>
         </DialogContent>

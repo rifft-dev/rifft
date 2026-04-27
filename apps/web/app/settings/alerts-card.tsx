@@ -53,8 +53,6 @@ const getSaveErrorMessage = (error?: string) => {
       return "Only workspace owners can change alert settings.";
     case "alerting_requires_paid_plan":
       return "Slack and email alerts are available on Cloud Pro and Scale.";
-    case "regression_digest_requires_scale_plan":
-      return "Automatic regression detection is available on Cloud Scale.";
     case "alert_destination_required":
       return "Add at least one Slack webhook or alert email before enabling alerts.";
     default:
@@ -139,7 +137,6 @@ export function AlertsCard({
         },
         body: JSON.stringify({
           fatal_failures_enabled: fatalFailuresEnabled,
-          regression_digest_enabled: false,
           slack_webhook_url: clearSlack ? null : slackWebhookUrl.trim() || undefined,
           alert_email: clearEmail ? null : email.trim() || null,
         }),
@@ -395,8 +392,6 @@ export function AlertsCard({
                         {delivery.channel === "slack" ? "Slack" : "Email"} ·{" "}
                         {delivery.event_type === "test"
                           ? "Test alert"
-                          : delivery.event_type === "regression_digest"
-                          ? "Automated report"
                           : "Fatal failure"}
                       </span>
                     </div>
