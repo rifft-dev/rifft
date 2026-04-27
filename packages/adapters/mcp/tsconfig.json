@@ -2,7 +2,10 @@
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    "paths": {
+      "@rifft-dev/rifft": ["../../sdk-js/src/index.ts"]
+    }
   },
   "include": ["src/**/*.ts"]
 }
