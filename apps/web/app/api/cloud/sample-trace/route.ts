@@ -13,7 +13,7 @@ const nano = (offsetMs: number, baseMs: number) =>
  * tool_call_hallucination) and a writer, so the trace detail page immediately
  * shows a root cause, a failing agent, and inter-agent messages.
  */
-export async function POST() {
+const createSampleTrace = async () => {
   let project: Awaited<ReturnType<typeof getProjectSettings>>;
   try {
     project = await getProjectSettings();
@@ -202,4 +202,15 @@ export async function POST() {
   }
 
   return NextResponse.json({ traceId });
+};
+
+export async function POST() {
+  try {
+    return await createSampleTrace();
+  } catch {
+    return NextResponse.json(
+      { error: "sample_trace_failed", message: "Could not send sample trace." },
+      { status: 500 },
+    );
+  }
 }

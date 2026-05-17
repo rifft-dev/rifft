@@ -32,6 +32,7 @@ type FirstTraceResponse = {
 };
 
 type FirstTraceError = "unauthorized" | "forbidden" | "missing_active_project" | "network_error" | null;
+type SampleTraceResponse = { traceId?: string; error?: string; message?: string };
 
 type RuntimeOption = "python" | "node";
 type FrameworkOption = "crewai" | "autogen" | "custom" | "mcp";
@@ -161,6 +162,15 @@ await withSpan("agent.run", { agent_id: "orchestrator", framework: "custom" }, a
 
 const maskApiKey = (value: string) => `${value.slice(0, 10)}...${value.slice(-6)}`;
 
+const readJsonResponse = async <T,>(response: Response): Promise<T | null> => {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    return null;
+  }
+
+  return (await response.json().catch(() => null)) as T | null;
+};
+
 export function FirstTraceOnboarding({
   project,
   ingestUrl,
@@ -171,7 +181,7 @@ export function FirstTraceOnboarding({
   const [hasCopiedKey, setHasCopiedKey] = useState(false);
   const [status, setStatus] = useState("Waiting for your first trace…");
   const [pollingStartedAt] = useState(Date.now());
- const [isSlowStart, setIsSlowStart] = useState(false);
+  const [isSlowStart, setIsSlowStart] = useState(false);
   const [firstTraceId, setFirstTraceId] = useState<string | null>(null);
   const [isStartingCheckout, setIsStartingCheckout] = useState(false);
   const [pollingError, setPollingError] = useState<FirstTraceError>(null);
@@ -184,9 +194,24 @@ export function FirstTraceOnboarding({
   const sendSampleTrace = async () => {
     try {
       setIsSendingSample(true);
-      const response = await fetch("/api/cloud/sample-trace", { method: "POST" });
-      const data = (await response.json()) as { traceId?: string; error?: string; message?: string };
-      if (!response.ok || !data.traceId) {
+      const response = await fetch("/api/cloud/sample-trace", {
+        method: "POST",
+        headers: { accept: "application/json" },
+        credentials: "include",
+      });
+      const data = await readJsonResponse<SampleTraceResponse>(response);
+
+      if (!response.ok || !data?.traceId) {
+        if (!data) {
+          throw new Error(
+            response.status === 401
+              ? "Your session expired. Sign in again, then try the sample trace."
+              : response.status === 404
+                ? "The sample trace endpoint is not available in this deployment."
+                : `Could not send sample trace. The server returned ${response.status}.`,
+          );
+        }
+
         throw new Error(data.message ?? data.error ?? "Could not send sample trace");
       }
       toast.success("Sample trace sent — opening it now");
