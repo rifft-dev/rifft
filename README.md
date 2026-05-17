@@ -126,6 +126,10 @@ rifft/
 - Exceptional product roadmap: [docs/exceptional-roadmap.md](/Users/ned/Documents/GitHub/Rifft/docs/exceptional-roadmap.md)
 - Use [scripts/cleanup-demo-traces.sh](/Users/ned/Documents/GitHub/Rifft/scripts/cleanup-demo-traces.sh) to remove stale pre-fix demo traces from local storage.
 
+## Community
+
+- Ask questions, share broken multi-agent traces, and follow updates in [GitHub Discussions](https://github.com/rifft-dev/rifft/discussions).
+
 ## Docs
 
 - Architecture notes: [docs/architecture.md](/Users/ned/Documents/GitHub/Rifft/docs/architecture.md)
