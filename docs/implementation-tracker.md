@@ -318,5 +318,3 @@ Free50K/month $0
 Pro500K/month$49/month 
 Scale2M/month$149/month
 EnterpriseUnlimited$500+/month
-
-The Polar integration

@@ -1,0 +1,9 @@
+README.md
+pyproject.toml
+src/rifft/adapters/mcp/__init__.py
+src/rifft_mcp.egg-info/PKG-INFO
+src/rifft_mcp.egg-info/SOURCES.txt
+src/rifft_mcp.egg-info/dependency_links.txt
+src/rifft_mcp.egg-info/requires.txt
+src/rifft_mcp.egg-info/top_level.txt
+tests/test_smoke.py

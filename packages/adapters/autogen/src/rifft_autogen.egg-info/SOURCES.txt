@@ -1,0 +1,9 @@
+README.md
+pyproject.toml
+src/rifft/adapters/autogen/__init__.py
+src/rifft_autogen.egg-info/PKG-INFO
+src/rifft_autogen.egg-info/SOURCES.txt
+src/rifft_autogen.egg-info/dependency_links.txt
+src/rifft_autogen.egg-info/requires.txt
+src/rifft_autogen.egg-info/top_level.txt
+tests/test_smoke.py
