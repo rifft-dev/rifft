@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { activeProjectCookieName, accessTokenCookieName } from "@/lib/project-cookie";
 import {
@@ -17,7 +18,7 @@ export const getAccessTokenFromCookies = async () => {
   return cookieStore.get(accessTokenCookieName)?.value ?? null;
 };
 
-export const resolveActiveProject = async (): Promise<ActiveProjectResolution> => {
+export const resolveActiveProject = cache(async (): Promise<ActiveProjectResolution> => {
   const cookieStore = await cookies();
   const preferredProjectId = cookieStore.get(activeProjectCookieName)?.value ?? null;
   const accessToken = cookieStore.get(accessTokenCookieName)?.value ?? null;
@@ -60,7 +61,7 @@ export const resolveActiveProject = async (): Promise<ActiveProjectResolution> =
     projects: body.projects ?? [],
     state: "loaded",
   });
-};
+});
 
 export const resolveActiveProjectId = async () => {
   const resolution = await resolveActiveProject();
