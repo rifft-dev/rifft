@@ -222,21 +222,7 @@ export default async function TraceDetailPage({
                 </Button>
               ) : null}
             </div>
-          ) : (
-            !baseline || isCurrentBaseline ? (
-              <div className="mt-6 rounded-2xl border bg-muted/20 p-4 text-sm text-muted-foreground">
-                {!baseline ? (
-                  <>
-                    No reference run set yet.{" "}
-                    <span className="text-foreground">Find a healthy run and click "Use as reference run"</span>
-                    {" "}— Rifft will compare every subsequent failure against it to show you what's new, what's resolved, and whether things are getting better or worse.
-                  </>
-                ) : (
-                  "This trace is your reference run, so newer runs will be compared against it."
-                )}
-              </div>
-            ) : null
-          )}
+          ) : null}
         </section>
         <InteractiveTraceDetail
           agentDetails={agentDetails}

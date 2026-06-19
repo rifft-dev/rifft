@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { href: "/", label: "Home" },
   { href: "/blog", label: "Blog" },
-  { href: "/docs", label: "Docs" },
+  { href: "https://github.com/rifft-dev/rifft/blob/main/README.md", label: "Docs" },
 ];
 
 export function PublicNav({
@@ -32,7 +32,7 @@ export function PublicNav({
         {items.map((item) => {
           const isActive =
             item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`);
-          const opensInNewTab = item.href === "/docs";
+          const opensInNewTab = item.href.startsWith("http");
 
           return (
             <Link

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, CircleDashed, Copy, Crown, FlaskConical, LoaderCircle, Sparkles, Wand2 } from "lucide-react";
+import { Copy, Crown, FlaskConical, LoaderCircle, Sparkles, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,9 +24,7 @@ type Props = {
 };
 
 type FirstTraceResponse = {
-  traces: Array<{
-    trace_id: string;
-  }>;
+  traces: Array<{ trace_id: string }>;
   total: number;
   page: number;
 };
@@ -34,101 +32,99 @@ type FirstTraceResponse = {
 type FirstTraceError = "unauthorized" | "forbidden" | "missing_active_project" | "network_error" | null;
 type SampleTraceResponse = { traceId?: string; error?: string; message?: string };
 
-type RuntimeOption = "python" | "node";
-type FrameworkOption = "crewai" | "autogen" | "custom" | "mcp";
+type TabOption = "crewai" | "autogen" | "python" | "node" | "mcp";
 type PackageManagerOption = "npm" | "pnpm" | "yarn";
 
-const runtimeFrameworks: Record<RuntimeOption, FrameworkOption[]> = {
-  python: ["crewai", "autogen", "custom"],
-  node: ["custom", "mcp"],
-};
+const TABS: { id: TabOption; label: string }[] = [
+  { id: "crewai",  label: "CrewAI"  },
+  { id: "autogen", label: "AutoGen" },
+  { id: "python",  label: "Python"  },
+  { id: "node",    label: "Node.js" },
+  { id: "mcp",     label: "MCP"     },
+];
 
-const frameworkLabels: Record<FrameworkOption, string> = {
-  crewai: "CrewAI",
-  autogen: "AutoGen",
-  custom: "Custom",
-  mcp: "MCP",
-};
-
-const runtimeMeta: Record<RuntimeOption, { title: string; description: string }> = {
-  python: {
-    title: "Python",
-    description: "CrewAI, AutoGen, and Python-based custom orchestration.",
-  },
-  node: {
-    title: "Node.js",
-    description: "JavaScript or TypeScript agents, services, and MCP clients.",
-  },
-};
-
-const frameworkMeta: Record<FrameworkOption, { title: string; description: string }> = {
-  crewai: {
-    title: "CrewAI",
-    description: "Auto-instrument CrewAI runs after `rifft.init(...)`.",
-  },
-  autogen: {
-    title: "AutoGen",
-    description: "Auto-instrument AutoGen flows with the Python adapter.",
-  },
-  custom: {
-    title: "Custom",
-    description: "Instrument your own agent and tool boundaries directly.",
-  },
-  mcp: {
-    title: "MCP",
-    description: "Wrap an MCP client and emit tool-call spans automatically.",
-  },
-};
-
-const buildInstallSnippet = ({
-  runtime,
-  framework,
+const buildSnippet = ({
+  tab,
   packageManager,
   projectId,
   ingestUrl,
   apiKey,
 }: {
-  runtime: RuntimeOption;
-  framework: FrameworkOption;
+  tab: TabOption;
   packageManager: PackageManagerOption;
   projectId: string;
   ingestUrl: string;
   apiKey: string | null;
 }) => {
-  if (runtime === "python") {
-    const packages =
-      framework === "crewai"
-        ? "rifft-sdk rifft-crewai"
-        : framework === "autogen"
-          ? "rifft-sdk rifft-autogen"
-          : "rifft-sdk";
+  const key = apiKey ?? "rft_live_...";
 
-    return `pip install ${packages}
+  if (tab === "crewai") {
+    return `pip install rifft-sdk rifft-crewai
 
 import rifft
 
 rifft.init(
   project_id="${projectId}",
   endpoint="${ingestUrl}",
-  api_key="${apiKey ?? "rft_live_..."}"
-)`;
+  api_key="${key}"
+)
+# CrewAI auto-instrumented — run your crew normally`;
   }
 
-  const installCommand =
-    packageManager === "pnpm"
-      ? framework === "mcp"
-        ? "pnpm add @rifft-dev/rifft @rifft-dev/mcp"
-        : "pnpm add @rifft-dev/rifft"
-      : packageManager === "yarn"
-        ? framework === "mcp"
-          ? "yarn add @rifft-dev/rifft @rifft-dev/mcp"
-          : "yarn add @rifft-dev/rifft"
-        : framework === "mcp"
-          ? "npm install @rifft-dev/rifft @rifft-dev/mcp"
-          : "npm install @rifft-dev/rifft";
+  if (tab === "autogen") {
+    return `pip install rifft-sdk rifft-autogen
 
-  if (framework === "mcp") {
-    return `${installCommand}
+import rifft
+
+rifft.init(
+  project_id="${projectId}",
+  endpoint="${ingestUrl}",
+  api_key="${key}"
+)
+# AutoGen auto-instrumented — run your flow normally`;
+  }
+
+  if (tab === "python") {
+    return `pip install rifft-sdk
+
+import rifft
+
+rifft.init(
+  project_id="${projectId}",
+  endpoint="${ingestUrl}",
+  api_key="${key}"
+)
+# wrap your agent boundaries manually`;
+  }
+
+  const install =
+    packageManager === "pnpm" ? "pnpm add @rifft-dev/rifft" :
+    packageManager === "yarn" ? "yarn add @rifft-dev/rifft" :
+    "npm install @rifft-dev/rifft";
+
+  if (tab === "node") {
+    return `${install}
+
+import { init, withSpan } from "@rifft-dev/rifft";
+
+init({
+  project_id: "${projectId}",
+  endpoint: "${ingestUrl}",
+  api_key: "${key}",
+});
+
+await withSpan("agent.run", { agent_id: "orchestrator" }, async () => {
+  // your agent logic here
+});`;
+  }
+
+  // mcp
+  const installMcp =
+    packageManager === "pnpm" ? "pnpm add @rifft-dev/rifft @rifft-dev/mcp" :
+    packageManager === "yarn" ? "yarn add @rifft-dev/rifft @rifft-dev/mcp" :
+    "npm install @rifft-dev/rifft @rifft-dev/mcp";
+
+  return `${installMcp}
 
 import { init } from "@rifft-dev/rifft";
 import { instrumentMcpClient } from "@rifft-dev/mcp";
@@ -136,27 +132,12 @@ import { instrumentMcpClient } from "@rifft-dev/mcp";
 init({
   project_id: "${projectId}",
   endpoint: "${ingestUrl}",
-  api_key: "${apiKey ?? "rft_live_..."}",
+  api_key: "${key}",
 });
 
 const tracedClient = instrumentMcpClient(mcpClient, {
   agent_id: "mcp-client",
   server_name: "my-mcp-server",
-});`;
-  }
-
-  return `${installCommand}
-
-import { init, withSpan } from "@rifft-dev/rifft";
-
-init({
-  project_id: "${projectId}",
-  endpoint: "${ingestUrl}",
-  api_key: "${apiKey ?? "rft_live_..."}",
-});
-
-await withSpan("agent.run", { agent_id: "orchestrator", framework: "custom" }, async () => {
-  // your agent logic here
 });`;
 };
 
@@ -164,10 +145,7 @@ const maskApiKey = (value: string) => `${value.slice(0, 10)}...${value.slice(-6)
 
 const readJsonResponse = async <T,>(response: Response): Promise<T | null> => {
   const contentType = response.headers.get("content-type") ?? "";
-  if (!contentType.includes("application/json")) {
-    return null;
-  }
-
+  if (!contentType.includes("application/json")) return null;
   return (await response.json().catch(() => null)) as T | null;
 };
 
@@ -180,16 +158,20 @@ export function FirstTraceOnboarding({
   const router = useRouter();
   const [hasCopiedKey, setHasCopiedKey] = useState(false);
   const [status, setStatus] = useState("Waiting for your first trace…");
-  const [pollingStartedAt] = useState(Date.now());
   const [isSlowStart, setIsSlowStart] = useState(false);
   const [firstTraceId, setFirstTraceId] = useState<string | null>(null);
   const [isStartingCheckout, setIsStartingCheckout] = useState(false);
   const [pollingError, setPollingError] = useState<FirstTraceError>(null);
-  const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
-  const [runtime, setRuntime] = useState<RuntimeOption>("python");
+  const [tab, setTab] = useState<TabOption>("crewai");
   const [packageManager, setPackageManager] = useState<PackageManagerOption>("npm");
-  const [framework, setFramework] = useState<FrameworkOption>("crewai");
   const [isSendingSample, setIsSendingSample] = useState(false);
+
+  const isNodeTab = tab === "node" || tab === "mcp";
+
+  const snippet = useMemo(
+    () => buildSnippet({ tab, packageManager, projectId: project.id, ingestUrl, apiKey: project.api_key }),
+    [tab, packageManager, project.id, ingestUrl, project.api_key],
+  );
 
   const sendSampleTrace = async () => {
     try {
@@ -200,19 +182,13 @@ export function FirstTraceOnboarding({
         credentials: "include",
       });
       const data = await readJsonResponse<SampleTraceResponse>(response);
-
       if (!response.ok || !data?.traceId) {
-        if (!data) {
-          throw new Error(
-            response.status === 401
-              ? "Your session expired. Sign in again, then try the sample trace."
-              : response.status === 404
-                ? "The sample trace endpoint is not available in this deployment."
-                : `Could not send sample trace. The server returned ${response.status}.`,
-          );
-        }
-
-        throw new Error(data.message ?? data.error ?? "Could not send sample trace");
+        throw new Error(
+          data?.message ?? data?.error ??
+          (response.status === 401 ? "Your session expired. Sign in again, then try the sample trace."
+            : response.status === 404 ? "Sample trace endpoint not available in this deployment."
+            : `Server returned ${response.status}.`)
+        );
       }
       toast.success("Sample trace sent — opening it now");
       router.push(`/traces/${data.traceId}`);
@@ -221,30 +197,9 @@ export function FirstTraceOnboarding({
       setIsSendingSample(false);
     }
   };
-  const installSnippet = useMemo(
-    () =>
-      buildInstallSnippet({
-        runtime,
-        framework,
-        packageManager,
-        projectId: project.id,
-        ingestUrl,
-        apiKey: project.api_key,
-      }),
-    [framework, ingestUrl, packageManager, project.api_key, project.id, runtime],
-  );
 
   useEffect(() => {
-    if (!runtimeFrameworks[runtime].includes(framework)) {
-      setFramework(runtimeFrameworks[runtime][0]);
-    }
-  }, [framework, runtime]);
-
-  useEffect(() => {
-    if (firstTraceId) {
-      return;
-    }
-
+    if (firstTraceId) return;
     let cancelled = false;
 
     const poll = async () => {
@@ -253,40 +208,27 @@ export function FirstTraceOnboarding({
           `/api/cloud/first-trace?since=${encodeURIComponent(onboardingStartedAt)}`,
           { cache: "no-store" },
         );
-        if (!cancelled) {
-          setLastCheckedAt(new Date());
-        }
 
         if (!response.ok) {
           const body = (await response.json().catch(() => ({}))) as { error?: string };
-          if (cancelled) {
-            return;
-          }
-
+          if (cancelled) return;
           const nextError =
             body.error === "forbidden" || body.error === "missing_active_project"
               ? (body.error as FirstTraceError)
-              : response.status === 401
-                ? "unauthorized"
-                : "network_error";
+              : response.status === 401 ? "unauthorized" : "network_error";
           setPollingError(nextError);
           setStatus(
-            nextError === "missing_active_project"
-              ? "We lost your active project while waiting for the first trace."
-              : nextError === "forbidden"
-                ? "You no longer have access to this project."
-                : nextError === "unauthorized"
-                  ? "Your session expired while waiting for the first trace."
-                  : "Rifft could not check for new traces right now.",
+            nextError === "missing_active_project" ? "We lost your active project while waiting."
+              : nextError === "forbidden" ? "You no longer have access to this project."
+              : nextError === "unauthorized" ? "Your session expired — sign in again."
+              : "Rifft could not check for new traces right now.",
           );
           return;
         }
 
         const data = (await response.json()) as FirstTraceResponse;
         const trace = data.traces[0];
-        if (!trace || cancelled) {
-          return;
-        }
+        if (!trace || cancelled) return;
 
         setPollingError(null);
         setFirstTraceId(trace.trace_id);
@@ -300,42 +242,30 @@ export function FirstTraceOnboarding({
           router.push(`/traces/${trace.trace_id}`);
         }
       } catch {
-        if (cancelled) {
-          return;
-        }
-
-        setLastCheckedAt(new Date());
+        if (cancelled) return;
         setPollingError("network_error");
-        setStatus("Rifft could not check for new traces right now.");
+        setStatus("Rifft couldn't reach the API — your trace won't be lost. Refresh to try again.");
       }
     };
 
     void poll();
-    const interval = window.setInterval(() => {
-      void poll();
-    }, 3000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
+    const interval = window.setInterval(() => void poll(), 3000);
+    return () => { cancelled = true; window.clearInterval(interval); };
   }, [firstTraceId, onboardingStartedAt, preferredPlan, router]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (!firstTraceId && !pollingError) setIsSlowStart(true);
+    }, 20_000);
+    return () => window.clearTimeout(timer);
+  }, [firstTraceId, pollingError]);
 
   const showProSuccessState = preferredPlan === "pro" && Boolean(firstTraceId);
   const canShowSnippet = Boolean(project.api_key);
 
-  useEffect(() => {
-  const timer = window.setTimeout(() => {
-    if (!firstTraceId && !pollingError) {
-      setIsSlowStart(true);
-    }
-  }, 20_000);
-
-  return () => window.clearTimeout(timer);
-}, [firstTraceId, pollingError]);
-
   return (
     <div className="space-y-8 px-6 py-8 lg:px-8">
+      {/* Header */}
       <section className="rounded-[2rem] border bg-card p-8 shadow-sm">
         <div className="max-w-4xl space-y-5">
           <div className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium text-muted-foreground">
@@ -352,23 +282,12 @@ export function FirstTraceOnboarding({
             Your project is ready.
           </h1>
           <p className="max-w-2xl text-lg text-muted-foreground">
-            Copy the hosted credentials below, run your first instrumented agent call, and Rifft
-            will open the first trace detail automatically as soon as it lands.
+            Copy the credentials below, run your first instrumented agent, and Rifft opens the trace automatically.
           </p>
-          <div className="flex flex-wrap gap-3 pt-1">
-            <div className="inline-flex items-center gap-2 rounded-full border bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
-              <Sparkles className="h-3.5 w-3.5 shrink-0" />
-              Failures automatically classified using the UC Berkeley MAST taxonomy
-            </div>
-            <div className="inline-flex items-center gap-2 rounded-full border bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
-              <Wand2 className="h-3.5 w-3.5 shrink-0" />
-              Fork and replay any handoff point without restarting your agents
-            </div>
-          </div>
         </div>
       </section>
 
-      {/* Zero-setup preview — lets users see the debugging UI before wiring their own code */}
+      {/* Sample trace shortcut */}
       <section className="rounded-[2rem] border border-dashed bg-card/50 p-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-1.5">
@@ -377,8 +296,8 @@ export function FirstTraceOnboarding({
               Don&apos;t have an agent ready yet?
             </div>
             <p className="max-w-xl text-sm text-muted-foreground">
-              Send a sample trace right now — a 3-agent content pipeline with a real failure — so you can
-              explore the graph view, root cause panel, and replay feature before connecting your own code.
+              Send a sample trace now — a 3-agent content pipeline with a real failure — to explore
+              the graph view, root cause panel, and replay before connecting your own code.
             </p>
           </div>
           <Button
@@ -387,22 +306,19 @@ export function FirstTraceOnboarding({
             onClick={sendSampleTrace}
             className="shrink-0"
           >
-            {isSendingSample ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : (
-              <FlaskConical className="h-4 w-4" />
-            )}
+            {isSendingSample ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <FlaskConical className="h-4 w-4" />}
             {isSendingSample ? "Sending…" : "Try a sample trace"}
           </Button>
         </div>
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+        {/* Left: credentials + snippet */}
         <Card>
           <CardHeader className="space-y-3">
             <CardTitle className="text-2xl">Project credentials</CardTitle>
             <p className="text-sm text-muted-foreground">
-              This is the shortest path from hosted sign-in to the graph view.
+              Copy the API key, pick your framework, then run the snippet.
             </p>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -418,6 +334,7 @@ export function FirstTraceOnboarding({
               </div>
             </div>
 
+            {/* API key */}
             <div className="space-y-3">
               <div className="text-sm font-medium">API key</div>
               <div className="flex gap-2">
@@ -431,128 +348,82 @@ export function FirstTraceOnboarding({
                   variant="outline"
                   disabled={!project.api_key}
                   onClick={async () => {
-                    if (!project.api_key) {
-                      return;
-                    }
+                    if (!project.api_key) return;
                     await navigator.clipboard.writeText(project.api_key);
                     setHasCopiedKey(true);
                     toast.success("API key copied");
                   }}
                 >
                   <Copy className="h-4 w-4" />
-                  Copy
+                  {hasCopiedKey ? "Copied" : "Copy"}
                 </Button>
               </div>
             </div>
 
+            {/* Framework tabs */}
             <div className="space-y-3">
               <div className="text-sm font-medium">Install and send your first trace</div>
-              <div className="space-y-3 rounded-2xl border bg-muted/15 p-4">
-                <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                  1. Choose runtime
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {(["python", "node"] as const).map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      className={`rounded-2xl border px-4 py-3 text-left transition-colors ${
-                        runtime === option
-                          ? "border-primary bg-primary/8"
-                          : "border-border bg-background hover:bg-muted/40"
-                      }`}
-                      onClick={() => setRuntime(option)}
-                    >
-                      <div className="text-sm font-medium">{runtimeMeta[option].title}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {runtimeMeta[option].description}
-                      </div>
-                    </button>
-                  ))}
-                </div>
+              <div className="flex flex-wrap gap-1 rounded-xl border bg-muted/20 p-1">
+                {TABS.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setTab(t.id)}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                      tab === t.id
+                        ? "bg-background shadow-sm text-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
               </div>
-              <div className="space-y-3 rounded-2xl border bg-muted/15 p-4">
-                <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                  2. Choose integration
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {runtimeFrameworks[runtime].map((option) => (
-                    <button
-                      key={option}
+
+              {/* Package manager (Node/MCP only) */}
+              {isNodeTab ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Package manager:</span>
+                  {(["npm", "pnpm", "yarn"] as const).map((pm) => (
+                    <Button
+                      key={pm}
                       type="button"
-                      className={`rounded-2xl border px-4 py-3 text-left transition-colors ${
-                        framework === option
-                          ? "border-primary bg-primary/8"
-                          : "border-border bg-background hover:bg-muted/40"
-                      }`}
-                      onClick={() => setFramework(option)}
+                      variant={packageManager === pm ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setPackageManager(pm)}
                     >
-                      <div className="text-sm font-medium">{frameworkMeta[option].title}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {frameworkMeta[option].description}
-                      </div>
-                    </button>
+                      {pm}
+                    </Button>
                   ))}
-                </div>
-              </div>
-              {runtime === "node" ? (
-                <div className="space-y-3 rounded-2xl border bg-muted/15 p-4">
-                  <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                    3. Choose package manager
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {(["npm", "pnpm", "yarn"] as const).map((option) => (
-                      <Button
-                        key={option}
-                        type="button"
-                        variant={packageManager === option ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => setPackageManager(option)}
-                      >
-                        {option}
-                      </Button>
-                    ))}
-                  </div>
                 </div>
               ) : null}
+
               {!canShowSnippet ? (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-muted-foreground">
-                  Ask a project owner to copy this snippet for you. Hosted API keys are only visible to owners, so this setup cannot be completed from a member account alone.
+                  Ask a project owner to copy this snippet — hosted API keys are only visible to owners.
                 </div>
               ) : (
-                <>
-                  <div className="space-y-2">
-                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-                      {runtime === "python" ? "3. Run this setup snippet" : "4. Run this setup snippet"}
-                    </div>
-                    <pre className="overflow-x-auto rounded-2xl border bg-muted/30 p-4 text-xs leading-6">
-                      <code>{installSnippet}</code>
-                    </pre>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={async () => {
-                        await navigator.clipboard.writeText(installSnippet);
-                        toast.success("Setup snippet copied");
-                      }}
-                    >
-                      <Copy className="h-4 w-4" />
-                      Copy snippet
-                    </Button>
-                    {hasCopiedKey ? (
-                      <span className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs text-muted-foreground">
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        API key copied
-                      </span>
-                    ) : null}
-                  </div>
-                </>
+                <div className="space-y-2">
+                  <pre className="overflow-x-auto rounded-2xl border bg-muted/30 p-4 text-xs leading-6">
+                    <code>{snippet}</code>
+                  </pre>
+                  <Button
+                    variant="outline"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(snippet);
+                      toast.success("Snippet copied");
+                    }}
+                  >
+                    <Copy className="h-4 w-4" />
+                    Copy snippet
+                  </Button>
+                </div>
               )}
             </div>
           </CardContent>
         </Card>
 
+        {/* Right: waiting state */}
         <Card>
           <CardHeader className="space-y-3">
             <CardTitle className="text-2xl">
@@ -560,8 +431,8 @@ export function FirstTraceOnboarding({
             </CardTitle>
             <p className="text-sm text-muted-foreground">
               {showProSuccessState
-                ? "You hit the first-trace moment. This is the best time to move into the Pro checkout."
-                : "Rifft is already listening for spans on your hosted project."}
+                ? "You hit the first-trace moment — best time to move into Pro."
+                : "Rifft is listening for spans on your hosted project."}
             </p>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -574,13 +445,14 @@ export function FirstTraceOnboarding({
                 )}
                 <span>{status}</span>
               </div>
+
               {showProSuccessState ? (
                 <div className="mt-4 space-y-4">
                   <div className="rounded-2xl border bg-background/80 p-4">
-                    <div className="text-sm font-medium">Upgrade when the value is fresh</div>
+                    <div className="text-sm font-medium">Upgrade while the value is fresh</div>
                     <p className="mt-2 text-sm text-muted-foreground">
-                      Pro gives you 90-day retention, 500K spans per month, unlimited team members, and a
-                      much smoother path once this project becomes part of your regular workflow.
+                      Pro gives you 90-day retention, 500K spans/month, unlimited team members,
+                      and replay from any handoff.
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -589,11 +461,8 @@ export function FirstTraceOnboarding({
                       onClick={async () => {
                         try {
                           setIsStartingCheckout(true);
-                          const response = await fetch("/api/cloud/pro-checkout", {
-                            method: "POST",
-                          });
+                          const response = await fetch("/api/cloud/pro-checkout", { method: "POST" });
                           const data = (await response.json()) as { url?: string; error?: string };
-
                           if (!response.ok || !data.url) {
                             throw new Error(
                               data.error === "forbidden"
@@ -601,18 +470,15 @@ export function FirstTraceOnboarding({
                                 : (data.error ?? "Could not create Stripe checkout"),
                             );
                           }
-
                           window.location.href = data.url;
                         } catch (error) {
-                          toast.error(
-                            error instanceof Error ? error.message : "Could not create Stripe checkout",
-                          );
+                          toast.error(error instanceof Error ? error.message : "Could not create Stripe checkout");
                           setIsStartingCheckout(false);
                         }
                       }}
                     >
                       <Crown className="h-4 w-4" />
-                      {isStartingCheckout ? "Opening checkout..." : "Upgrade to Pro"}
+                      {isStartingCheckout ? "Opening checkout…" : "Upgrade to Pro"}
                     </Button>
                     <Button variant="outline" onClick={() => router.push(`/traces/${firstTraceId}`)}>
                       Open first trace
@@ -620,90 +486,30 @@ export function FirstTraceOnboarding({
                   </div>
                 </div>
               ) : (
-                <>
-                 <div className="mt-4 flex items-center gap-3 text-sm text-muted-foreground">
-  <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-primary" />
-  <span>Listening for spans · checking every few seconds</span>
-</div>
-                </>
+                <div className="mt-4 flex items-center gap-3 text-sm text-muted-foreground">
+                  <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-primary" />
+                  <span>Listening for spans · checking every few seconds</span>
+                </div>
               )}
             </div>
 
-            <div className="space-y-3 rounded-2xl border bg-muted/20 p-5">
-              <div className="text-sm font-medium">Before you run it</div>
-              <ul className="space-y-2 text-sm text-muted-foreground">
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" />
-                  <span>Use <code>project_id="{project.id}"</code> exactly as shown.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" />
-                  <span>Send spans to <code>{ingestUrl}</code>.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" />
-                  <span>
-                    {project.api_key
-                      ? "Use the hosted API key for this project, not a local or old key."
-                      : "Ask a project owner to reveal or rotate the hosted API key first."}
-                  </span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" />
-                  <span>
-                    {runtime === "node" && framework === "mcp"
-                      ? <>Install <code>@rifft-dev/mcp</code> to wrap your MCP client and emit tool-call spans automatically.</>
-                      : runtime === "node"
-                        ? <>Use <code>@rifft-dev/rifft</code> in your Node app, then wrap the important agent and tool boundaries with spans.</>
-                        : framework === "crewai"
-                      ? <>If <code>rifft-crewai</code> is installed, <code>rifft.init(...)</code> auto-instruments CrewAI for you.</>
-                      : framework === "autogen"
-                        ? <>If <code>rifft-autogen</code> is installed, <code>rifft.init(...)</code> auto-instruments AutoGen for you.</>
-                        : <>Use the base SDK for custom loops, then add framework-specific adapters as needed.</>}
-                  </span>
-                </li>
-              </ul>
-            </div>
+            {isSlowStart && !firstTraceId && !pollingError ? (
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200">
+                Still waiting. Most common cause: mismatched project ID, endpoint, or API key.
+              </div>
+            ) : null}
 
-            <div className="space-y-3 rounded-2xl border bg-muted/20 p-5">
-              <div className="text-sm font-medium">What to check if it still looks quiet</div>
-              <ul className="space-y-2 text-sm text-muted-foreground">
-                <li className="flex items-start gap-2">
-                  <CircleDashed className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>Your terminal should show the instrumented run actually starting.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CircleDashed className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>
-                    Collector errors usually show up as <code>invalid_api_key</code>,{" "}
-                    <code>span_limit_exceeded</code>, or <code>no_spans_extracted</code>.
-                  </span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CircleDashed className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>
-                    If you pasted the snippet into a different repo or script, double-check that
-                    the environment actually ran after initialization.
-                  </span>
-                </li>
-              </ul>
-             {isSlowStart && !firstTraceId && !pollingError ? (
-  <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200">
-    Still waiting. The most common cause is a mismatched project ID, endpoint, or API key.
-  </div>
-) : null}
-              {pollingError ? (
-                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200">
-                 {pollingError === "unauthorized"
-  ? "Your session expired. Sign in again and Rifft will resume listening."
-  : pollingError === "forbidden"
-    ? "This project is no longer available to your account."
-    : pollingError === "missing_active_project"
-      ? "Choose an active project again before continuing."
-      : "Rifft couldn't reach the API to check — your trace won't be lost. Refresh the page to try again."}
-                </div>
-              ) : null}
-            </div>
+            {pollingError ? (
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200">
+                {pollingError === "unauthorized"
+                  ? "Your session expired. Sign in again and Rifft will resume listening."
+                  : pollingError === "forbidden"
+                    ? "This project is no longer available to your account."
+                    : pollingError === "missing_active_project"
+                      ? "Choose an active project again before continuing."
+                      : "Rifft couldn't reach the API — your trace won't be lost. Refresh to try again."}
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </div>

@@ -7,7 +7,7 @@ import { AlertTriangle, ArrowRight, CheckCircle2, Info, Loader2, Search, Sparkle
 import { setCookieValue } from "@/lib/project-cookie";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Command, CommandInput } from "@/components/ui/command";
 import {
   Select,
@@ -154,17 +154,7 @@ export function TraceListClient({
       <div className="space-y-6">
       <Card className="section-fade overflow-hidden rounded-[2rem] border bg-[radial-gradient(circle_at_top_left,hsl(var(--destructive))/0.12,transparent_24%),radial-gradient(circle_at_bottom_right,hsl(var(--chart-1))/0.12,transparent_28%),hsl(var(--card))] shadow-sm">
         <CardHeader className="gap-5">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="space-y-2">
-              <CardTitle className="text-2xl">Incident queue</CardTitle>
-              <p className="max-w-2xl text-sm text-muted-foreground">
-                Prioritised by failure severity and likely debugging value, not just recency.
-              </p>
-            </div>
-            <Badge variant="outline">{filtered.length} visible traces</Badge>
-          </div>
-
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_180px]">
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_180px_auto]">
             <Command className="rounded-xl border border-input bg-background/80">
               <CommandInput
                 placeholder="Search trace IDs, frameworks, or failure modes..."
@@ -196,6 +186,7 @@ export function TraceListClient({
                 ))}
               </SelectContent>
             </Select>
+            <Badge variant="outline" className="self-center whitespace-nowrap">{filtered.length} traces</Badge>
           </div>
 
           {initialMode && query === getMastMeta(initialMode).label ? (

@@ -58,7 +58,7 @@ const navItems = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-const docsHref = process.env.NEXT_PUBLIC_DOCS_URL ?? "/docs";
+const docsHref = process.env.NEXT_PUBLIC_DOCS_URL ?? "https://github.com/rifft-dev/rifft/blob/main/README.md";
 const docsIsExternal = docsHref.startsWith("http://") || docsHref.startsWith("https://");
 
 type CloudProject = {
