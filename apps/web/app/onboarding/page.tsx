@@ -20,8 +20,8 @@ export default async function OnboardingPage() {
       <div className="space-y-8 px-6 py-8 lg:px-8">
         <section className="rounded-[2rem] border bg-card p-8 shadow-sm">
           <div className="max-w-3xl space-y-5">
-            <Badge variant="outline">Onboarding</Badge>
-            <h1 className="text-4xl font-semibold tracking-tight lg:text-5xl">
+            <Badge variant="outline" className="font-display text-[10px] uppercase tracking-[0.12em]">Onboarding</Badge>
+            <h1 className="font-display text-4xl font-medium lg:text-5xl">
               This workspace is already being set up by an owner.
             </h1>
             <p className="text-lg text-muted-foreground">

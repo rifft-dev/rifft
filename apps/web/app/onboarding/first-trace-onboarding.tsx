@@ -278,7 +278,7 @@ export function FirstTraceOnboarding({
               You&apos;re on the Pro path
             </div>
           ) : null}
-          <h1 className="max-w-3xl text-4xl font-semibold tracking-tight lg:text-5xl">
+          <h1 className="font-display max-w-3xl text-4xl font-medium lg:text-5xl">
             Your project is ready.
           </h1>
           <p className="max-w-2xl text-lg text-muted-foreground">
@@ -316,7 +316,7 @@ export function FirstTraceOnboarding({
         {/* Left: credentials + snippet */}
         <Card>
           <CardHeader className="space-y-3">
-            <CardTitle className="text-2xl">Project credentials</CardTitle>
+            <CardTitle className="font-display text-2xl font-medium">Project credentials</CardTitle>
             <p className="text-sm text-muted-foreground">
               Copy the API key, pick your framework, then run the snippet.
             </p>
@@ -426,7 +426,7 @@ export function FirstTraceOnboarding({
         {/* Right: waiting state */}
         <Card>
           <CardHeader className="space-y-3">
-            <CardTitle className="text-2xl">
+            <CardTitle className="font-display text-2xl font-medium">
               {showProSuccessState ? "Your first trace is live" : "Waiting for first trace"}
             </CardTitle>
             <p className="text-sm text-muted-foreground">
