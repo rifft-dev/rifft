@@ -82,9 +82,9 @@ export function DatasetDetailClient({
     );
   }
 
-  const ingestUrl = process.env.NEXT_PUBLIC_API_URL ?? "https://api.rifft.dev";
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "https://api.rifft.dev";
   const key = apiKey ?? "rft_live_...";
-  const ciUrl = `${ingestUrl}/projects/${dataset.project_id}/eval-datasets/${dataset.id}/ci`;
+  const ciUrl = `${apiUrl}/projects/${dataset.project_id}/eval-datasets/${dataset.id}/ci`;
   const curlSnippet = `curl -sf -o /dev/null \\
   -H "Authorization: Bearer ${key}" \\
   "${ciUrl}"`;

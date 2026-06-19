@@ -2398,7 +2398,17 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
     return result;
   });
 
-  // Configure webhook URL for eval CI notifications
+  // Get / configure webhook URL for eval CI notifications
+  app.get("/projects/:id/eval-webhook", async (request, reply) => {
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
+    if (!user) { reply.code(401); return { error: "unauthorized" }; }
+    const { id: projectId } = request.params as { id: string };
+    const project = await getAccessibleProject(user.id, projectId);
+    if (!project) { reply.code(403); return { error: "forbidden" }; }
+    const webhookUrl = await getEvalWebhookUrl(projectId);
+    return { webhook_url: webhookUrl };
+  });
+
   app.patch("/projects/:id/eval-webhook", async (request, reply) => {
     const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
     if (!user) { reply.code(401); return { error: "unauthorized" }; }

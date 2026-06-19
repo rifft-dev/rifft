@@ -155,3 +155,13 @@ export const removeTraceFromDataset = (
     `/api/projects/${projectId}/eval-datasets/${datasetId}/entries/${traceId}`,
     { method: "DELETE" },
   );
+
+export const updateEvalWebhookUrl = (projectId: string, webhookUrl: string | null) =>
+  fetchBrowserJson<{ ok: boolean }>(
+    `/api/projects/${projectId}/eval-webhook`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ webhook_url: webhookUrl }),
+    },
+  );

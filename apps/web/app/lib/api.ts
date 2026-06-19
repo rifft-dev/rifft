@@ -148,3 +148,16 @@ export const getEvalDataset = async (datasetId: string): Promise<EvalDatasetDeta
     return null;
   }
 };
+
+export const getEvalWebhookUrl = async (): Promise<string | null> => {
+  const projectId = await resolveActiveProjectId();
+  if (!projectId) return null;
+  try {
+    const result = await fetchJson<{ webhook_url: string | null }>(
+      `/projects/${projectId}/eval-webhook`,
+    );
+    return result.webhook_url;
+  } catch {
+    return null;
+  }
+};

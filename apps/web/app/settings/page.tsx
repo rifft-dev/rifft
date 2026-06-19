@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
   getCloudProjects,
+  getEvalWebhookUrl,
   getProjectAlerts,
   getProjectSettings,
   getProjectUsageSummary,
@@ -13,6 +14,7 @@ import { requireCloudProject } from "../lib/require-cloud-project";
 import { ApiKeyCard } from "./api-key-card";
 import { AlertsCard } from "./alerts-card";
 import { CorrelationCard } from "./correlation-card";
+import { EvalWebhookCard } from "./eval-webhook-card";
 import { InviteMemberCard } from "../invite-member-card";
 import { ManageBillingButton } from "./manage-billing-button";
 import { RefreshStatusButton } from "./refresh-status-button";
@@ -29,11 +31,12 @@ type SettingsPageProps = {
 export default async function SettingsPage({ searchParams }: SettingsPageProps) {
   const params = searchParams ? await searchParams : undefined;
   await requireCloudProject("/settings");
-  const [project, usageSummary, cloudProjects, alerts] = await Promise.all([
+  const [project, usageSummary, cloudProjects, alerts, evalWebhookUrl] = await Promise.all([
     getProjectSettings(),
     getProjectUsageSummary(),
     getCloudProjects(),
     getProjectAlerts(),
+    getEvalWebhookUrl().catch(() => null),
   ]);
   const workspaces = [...cloudProjects.projects].sort((a, b) => {
     const left = new Date(a.created_at).getTime();
@@ -71,9 +74,9 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
         </div>
       )}
       <section className="space-y-3">
-        <Badge variant="outline">Settings</Badge>
+        <Badge variant="outline" className="font-display text-[10px] uppercase tracking-[0.12em]">Settings</Badge>
         <div className="space-y-2">
-          <h1 className="text-4xl font-semibold tracking-tight">Settings</h1>
+          <h1 className="font-display text-4xl font-medium">Settings</h1>
           <p className="max-w-2xl text-muted-foreground">
             Manage billing, API access, alert thresholds, and team access.
           </p>
@@ -193,6 +196,12 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
       <AlertsCard
         projectId={project.id}
         alerts={alerts}
+        canManage={project.permissions.can_update_settings}
+      />
+
+      <EvalWebhookCard
+        projectId={project.id}
+        initialWebhookUrl={evalWebhookUrl}
         canManage={project.permissions.can_update_settings}
       />
 
