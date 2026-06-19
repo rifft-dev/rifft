@@ -906,8 +906,8 @@ export function InteractiveTraceDetail({
               <div className="flex flex-col gap-4 rounded-3xl border bg-card/70 p-4 shadow-sm backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between">
                 <div className="space-y-2">
                   <TabsList>
-                    <TabsTrigger value="graph">Conversation path</TabsTrigger>
-                    <TabsTrigger value="timeline">Timeline</TabsTrigger>
+                    <TabsTrigger value="graph" className="font-display text-[11px] font-medium uppercase tracking-[0.08em]">Conversation path</TabsTrigger>
+                    <TabsTrigger value="timeline" className="font-display text-[11px] font-medium uppercase tracking-[0.08em]">Timeline</TabsTrigger>
                   </TabsList>
                 </div>
                 <div className="text-sm text-muted-foreground">
@@ -1135,8 +1135,8 @@ export function InteractiveTraceDetail({
             <>
             <Card className="rounded-3xl border-border/50 shadow-sm">
               <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base font-medium text-muted-foreground">
-                  <GitBranch className="h-4 w-4" />
+                <CardTitle className="font-display flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
+                  <GitBranch className="h-3.5 w-3.5" />
                   {selectedMessage ? "Selected handoff" : "First bad handoff"}
                 </CardTitle>
               </CardHeader>
@@ -1187,8 +1187,8 @@ export function InteractiveTraceDetail({
             {focusPayloadHints.length > 0 ? (
             <Card className="rounded-3xl border-border/50 shadow-sm">
               <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base font-medium text-muted-foreground">
-                  <CircleAlert className="h-4 w-4" />
+                <CardTitle className="font-display flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
+                  <CircleAlert className="h-3.5 w-3.5" />
                   What changed here
                 </CardTitle>
               </CardHeader>
@@ -1206,8 +1206,8 @@ export function InteractiveTraceDetail({
             {selectedPathFailures.length > 0 ? (
             <Card className="rounded-3xl border-border/50 shadow-sm">
               <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base font-medium text-muted-foreground">
-                  <ShieldAlert className="h-4 w-4" />
+                <CardTitle className="font-display flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
+                  <ShieldAlert className="h-3.5 w-3.5" />
                   What happened next
                 </CardTitle>
               </CardHeader>
@@ -1235,7 +1235,7 @@ export function InteractiveTraceDetail({
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
         <SheetContent side="right" className="flex w-full max-w-[480px] flex-col gap-0 p-0">
           <SheetHeader className="border-b px-6 py-5">
-            <SheetTitle className="font-mono">
+            <SheetTitle className="font-display font-medium uppercase tracking-[0.08em]">
               {selectedAgent?.summary.agent_id ?? "Agent detail"}
             </SheetTitle>
             <SheetDescription>
@@ -1267,7 +1267,7 @@ export function InteractiveTraceDetail({
                 className="flex min-h-0 flex-1 flex-col"
               >
                 <TabsList className="mx-6 mt-4 w-auto justify-start rounded-xl">
-                  <TabsTrigger value="messages">
+                  <TabsTrigger value="messages" className="font-display text-[10px] font-medium uppercase tracking-[0.08em]">
                     Messages
                     {selectedAgent.messages.length > 0 ? (
                       <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">
@@ -1275,7 +1275,7 @@ export function InteractiveTraceDetail({
                       </span>
                     ) : null}
                   </TabsTrigger>
-                  <TabsTrigger value="tools">
+                  <TabsTrigger value="tools" className="font-display text-[10px] font-medium uppercase tracking-[0.08em]">
                     Tool calls
                     {selectedAgent.tool_calls.length > 0 ? (
                       <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">
@@ -1283,7 +1283,7 @@ export function InteractiveTraceDetail({
                       </span>
                     ) : null}
                   </TabsTrigger>
-                  <TabsTrigger value="failures">
+                  <TabsTrigger value="failures" className="font-display text-[10px] font-medium uppercase tracking-[0.08em]">
                     Failures
                     {selectedAgent.mast_failures.length > 0 ? (
                       <span className="ml-1.5 rounded-full bg-destructive/15 px-1.5 py-0.5 text-[10px] tabular-nums text-destructive">
@@ -1291,8 +1291,8 @@ export function InteractiveTraceDetail({
                       </span>
                     ) : null}
                   </TabsTrigger>
-                  <TabsTrigger value="context">Decisions</TabsTrigger>
-                  <TabsTrigger value="history">History</TabsTrigger>
+                  <TabsTrigger value="context" className="font-display text-[10px] font-medium uppercase tracking-[0.08em]">Decisions</TabsTrigger>
+                  <TabsTrigger value="history" className="font-display text-[10px] font-medium uppercase tracking-[0.08em]">History</TabsTrigger>
                 </TabsList>
                 <ScrollArea className="flex-1">
                   <TabsContent value="messages" className="mt-0 px-6 py-4">

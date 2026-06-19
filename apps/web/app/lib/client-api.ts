@@ -1,4 +1,4 @@
-import type { ForkDraft, TraceBaseline, TraceSummary } from "./api-types";
+import type { EvalDataset, ForkDraft, TraceBaseline, TraceSummary } from "./api-types";
 
 type ReplayResult = {
   runId: string;
@@ -113,3 +113,45 @@ export const createPlanCheckout = (plan: "pro" | "scale") =>
     },
     body: JSON.stringify({ planKey: plan }),
   });
+
+export const createEvalDataset = (projectId: string, name: string, description?: string) =>
+  fetchBrowserJson<{ dataset: EvalDataset }>(
+    `/api/projects/${projectId}/eval-datasets`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, description }),
+    },
+  );
+
+export const deleteEvalDataset = (projectId: string, datasetId: string) =>
+  fetchBrowserJson<{ ok: boolean }>(
+    `/api/projects/${projectId}/eval-datasets/${datasetId}`,
+    { method: "DELETE" },
+  );
+
+export const addTraceToDataset = (
+  projectId: string,
+  datasetId: string,
+  traceId: string,
+  label?: "pass" | "fail",
+  note?: string,
+) =>
+  fetchBrowserJson<{ ok: boolean }>(
+    `/api/projects/${projectId}/eval-datasets/${datasetId}/entries`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ traceId, label, note }),
+    },
+  );
+
+export const removeTraceFromDataset = (
+  projectId: string,
+  datasetId: string,
+  traceId: string,
+) =>
+  fetchBrowserJson<{ ok: boolean }>(
+    `/api/projects/${projectId}/eval-datasets/${datasetId}/entries/${traceId}`,
+    { method: "DELETE" },
+  );

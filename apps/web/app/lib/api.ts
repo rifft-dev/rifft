@@ -3,6 +3,9 @@ import { resolveActiveProjectId } from "@/lib/cloud-context";
 export type {
   AgentDetail,
   CloudProjectSummary,
+  EvalDataset,
+  EvalDatasetDetail,
+  EvalDatasetEntry,
   ForkDraft,
   ProjectInsightsSummary,
   ProjectAlerts,
@@ -20,6 +23,8 @@ export type {
 import type {
   AgentDetail,
   CloudProjectSummary,
+  EvalDataset,
+  EvalDatasetDetail,
   ForkDraft,
   OptimizationSuggestionsResult,
   ProjectInsightsSummary,
@@ -121,4 +126,25 @@ export const getOptimizationSuggestions = async (): Promise<OptimizationSuggesti
   return fetchJson<OptimizationSuggestionsResult>(
     `/projects/${projectId}/optimization-suggestions`,
   );
+};
+
+export const listEvalDatasets = async (): Promise<EvalDataset[]> => {
+  const projectId = await resolveActiveProjectId();
+  if (!projectId) return [];
+  const result = await fetchJson<{ datasets: EvalDataset[] }>(
+    `/projects/${projectId}/eval-datasets`,
+  );
+  return result.datasets;
+};
+
+export const getEvalDataset = async (datasetId: string): Promise<EvalDatasetDetail | null> => {
+  const projectId = await resolveActiveProjectId();
+  if (!projectId) return null;
+  try {
+    return await fetchJson<EvalDatasetDetail>(
+      `/projects/${projectId}/eval-datasets/${datasetId}`,
+    );
+  } catch {
+    return null;
+  }
 };

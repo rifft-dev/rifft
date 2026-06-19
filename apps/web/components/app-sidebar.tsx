@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import {
   Activity,
   BookOpen,
+  Database,
   EllipsisVertical,
   LogIn,
   LogOut,
@@ -55,6 +56,7 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { href: "/workspace", label: "Overview", icon: Activity },
   { href: "/traces", label: "Traces", icon: Workflow },
+  { href: "/datasets", label: "Datasets", icon: Database },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -220,7 +222,7 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
           <div className="flex h-8 w-8 items-center justify-center rounded-2xl border border-sidebar-border/80 bg-background/80 shadow-sm">
             <RifftLogo wordmark={false} className="h-4 w-auto text-foreground" />
           </div>
-          <div className="text-[13px] font-medium tracking-[-0.02em] text-foreground">Rifft</div>
+          <div className="font-display text-sm font-medium uppercase tracking-[0.12em] text-foreground">Rifft</div>
         </div>
 
         <div className="mt-3">
@@ -320,17 +322,17 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "group flex items-center gap-3 rounded-xl px-3 py-2 text-[13px] transition-colors",
+                  "group flex items-center gap-3 rounded-xl px-3 py-2 text-[11px] font-medium uppercase tracking-[0.1em] transition-colors",
                   active
-                    ? "bg-zinc-800 text-zinc-100"
-                    : "text-sidebar-foreground/68 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
+                    ? "bg-zinc-800 text-white dark:bg-zinc-800"
+                    : "text-sidebar-foreground/60 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
                 )}
                 onClick={closeMobileNav}
               >
                 <Icon
                   className={cn(
-                    "h-4 w-4 shrink-0 transition-opacity",
-                    active ? "opacity-100" : "opacity-70 group-hover:opacity-100",
+                    "h-4 w-4 shrink-0 transition-colors",
+                    active ? "text-[#4fbf6a]" : "opacity-60 group-hover:opacity-100",
                   )}
                 />
                 <span>{item.label}</span>
@@ -345,10 +347,10 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
           <Link
             href={docsHref}
             className={cn(
-              "group flex items-center gap-3 rounded-xl px-3 py-2 text-[13px] transition-colors",
+              "group flex items-center gap-3 rounded-xl px-3 py-2 text-[11px] font-medium uppercase tracking-[0.1em] transition-colors",
               !docsIsExternal && pathname === "/docs"
-                ? "bg-zinc-800 text-zinc-100"
-                : "text-sidebar-foreground/68 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
+                ? "bg-zinc-800 text-white"
+                : "text-sidebar-foreground/60 hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
             )}
             target="_blank"
             rel="noreferrer"
@@ -356,8 +358,8 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
           >
             <BookOpen
               className={cn(
-                "h-4 w-4 shrink-0 transition-opacity",
-                !docsIsExternal && pathname === "/docs" ? "opacity-100" : "opacity-70 group-hover:opacity-100",
+                "h-4 w-4 shrink-0 transition-colors",
+                !docsIsExternal && pathname === "/docs" ? "text-[#4fbf6a]" : "opacity-60 group-hover:opacity-100",
               )}
             />
             <span>Docs</span>

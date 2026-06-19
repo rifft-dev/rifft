@@ -443,11 +443,12 @@ export function FailureExplanationCard({
   }
 
   return (
-    <Card className="rounded-3xl border-chart-1/30 bg-gradient-to-br from-chart-1/8 via-card to-card shadow-sm">
+    <Card className="overflow-hidden rounded-3xl border-chart-1/30 shadow-sm">
+      <div className="h-0.5 w-full bg-gradient-to-r from-chart-1 via-chart-1/60 to-transparent" />
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Bot className="h-5 w-5 text-chart-1" />
+          <CardTitle className="font-display flex items-center gap-2 text-lg font-medium uppercase tracking-[0.08em]">
+            <Bot className="h-4 w-4 text-chart-1" />
             {state.kind === "fallback" ? "What Rifft found" : "What to look at first"}
           </CardTitle>
         </div>

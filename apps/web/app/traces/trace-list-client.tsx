@@ -131,7 +131,7 @@ export function TraceListClient({
             <Search className="h-6 w-6 text-muted-foreground" />
           </div>
           <div className="space-y-1">
-            <div className="text-lg font-medium">No traces yet</div>
+            <div className="font-display text-lg font-medium uppercase tracking-[0.06em]">No traces yet</div>
             <p className="max-w-sm text-sm text-muted-foreground">
               Rifft receives traces over OTLP. Point your agent framework at the collector and your runs will appear here automatically.
             </p>
@@ -210,8 +210,8 @@ export function TraceListClient({
           {firstIncident ? (
             <div className="grid gap-3 rounded-2xl border border-destructive/20 bg-[radial-gradient(circle_at_top_left,hsl(var(--destructive))/0.1,transparent_28%),hsl(var(--background))/0.84] p-4 lg:grid-cols-[1fr_auto] lg:items-center">
               <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm font-medium text-destructive">
-                  <AlertTriangle className="h-4 w-4" />
+                <div className="font-display flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-destructive">
+                  <AlertTriangle className="h-3.5 w-3.5" />
                   Open this one first
                 </div>
                 <div className="font-mono text-sm">{getTraceDisplayName(firstIncident)}</div>
@@ -269,7 +269,7 @@ export function TraceListClient({
           <Card className="surface-lift rounded-3xl shadow-sm">
             <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
               <Search className="h-8 w-8 text-muted-foreground" />
-              <div className="text-lg font-medium">No traces match the current filters</div>
+              <div className="font-display text-lg font-medium uppercase tracking-[0.06em]">No traces match the current filters</div>
               <p className="max-w-md text-sm text-muted-foreground">
                 Try clearing the search or switching the framework and status filters.
               </p>
@@ -312,8 +312,8 @@ export function TraceListClient({
                       <Badge variant="outline">{formatRelative(trace.started_at)}</Badge>
                     </div>
                     <div>
-                      <div className="font-mono text-sm">{getTraceDisplayName(trace)}</div>
-                      <div className="mt-1 text-sm text-muted-foreground">
+                      <div className="font-mono text-sm font-medium">{getTraceDisplayName(trace)}</div>
+                      <div className="mt-1 font-mono text-xs text-muted-foreground">
                         {trace.agent_count} agents • {formatDuration(trace.duration_ms)} • {formatCurrency(trace.total_cost_usd)}
                       </div>
                     </div>
@@ -356,9 +356,9 @@ export function TraceListClient({
                   </div>
 
                   <div className="flex justify-start lg:justify-end">
-                    <div className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                      Open trace
-                      <ArrowRight className="h-4 w-4" />
+                    <div className="font-display inline-flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.1em] text-chart-1">
+                      Open
+                      <ArrowRight className="h-3.5 w-3.5" />
                     </div>
                   </div>
                 </CardContent>

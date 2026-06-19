@@ -18,8 +18,8 @@ export default async function TracesPage({ searchParams }: TracesPageProps) {
   return (
     <div className="space-y-6 px-6 py-8 lg:px-8">
       <section className="rounded-[2rem] border bg-[radial-gradient(circle_at_top_left,hsl(var(--destructive))/0.1,transparent_26%),radial-gradient(circle_at_top_right,hsl(var(--chart-1))/0.12,transparent_30%),hsl(var(--card))] p-8 shadow-sm">
-        <Badge variant="outline">Incident queue</Badge>
-       <h1 className="mt-4 text-4xl font-semibold tracking-tight">Open the run that matters first</h1>
+        <Badge variant="outline" className="font-display text-[10px] uppercase tracking-[0.12em]">Incident queue</Badge>
+        <h1 className="font-display mt-4 text-4xl font-medium">Open the run that matters first</h1>
         <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
           Failure badges use the{" "}
           <span className="font-medium text-foreground">UC Berkeley MAST taxonomy</span>

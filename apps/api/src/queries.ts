@@ -2898,6 +2898,225 @@ export const upsertForkDraft = async (traceId: string, spanId: string, payload: 
   } satisfies ForkDraft;
 };
 
+// ─── Eval Datasets ────────────────────────────────────────────────────────────
+
+let evalDatasetsTableEnsured = false;
+
+const ensureEvalDatasetsTable = async () => {
+  if (evalDatasetsTableEnsured) return;
+
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS eval_datasets (
+      id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pgPool.query(`
+    CREATE INDEX IF NOT EXISTS eval_datasets_project_id_idx
+      ON eval_datasets (project_id, created_at DESC)
+  `);
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS eval_dataset_entries (
+      id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+      dataset_id TEXT NOT NULL REFERENCES eval_datasets(id) ON DELETE CASCADE,
+      trace_id TEXT NOT NULL REFERENCES traces(trace_id) ON DELETE CASCADE,
+      label TEXT CHECK (label IN ('pass', 'fail') OR label IS NULL),
+      note TEXT,
+      added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (dataset_id, trace_id)
+    )
+  `);
+  await pgPool.query(`
+    CREATE INDEX IF NOT EXISTS eval_dataset_entries_dataset_id_idx
+      ON eval_dataset_entries (dataset_id, added_at DESC)
+  `);
+
+  evalDatasetsTableEnsured = true;
+};
+
+export type EvalDatasetRow = {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+  entry_count: number;
+};
+
+export type EvalDatasetEntryRow = {
+  id: string;
+  dataset_id: string;
+  trace_id: string;
+  label: "pass" | "fail" | null;
+  note: string | null;
+  added_at: string;
+  // joined from traces
+  root_span_name: string | null;
+  started_at: string | null;
+  status: string | null;
+  duration_ms: number | null;
+  total_cost_usd: number | null;
+  agent_count: number | null;
+  framework: string[] | null;
+};
+
+export const listEvalDatasets = async (projectId: string): Promise<EvalDatasetRow[]> => {
+  await ensureEvalDatasetsTable();
+  const result = await pgPool.query(
+    `
+      SELECT
+        d.id, d.project_id, d.name, d.description, d.created_at, d.updated_at,
+        COUNT(e.id)::int AS entry_count
+      FROM eval_datasets d
+      LEFT JOIN eval_dataset_entries e ON e.dataset_id = d.id
+      WHERE d.project_id = $1
+      GROUP BY d.id
+      ORDER BY d.created_at DESC
+    `,
+    [projectId],
+  );
+  return result.rows.map((r) => ({
+    id: r.id as string,
+    project_id: r.project_id as string,
+    name: r.name as string,
+    description: r.description as string | null,
+    created_at: r.created_at instanceof Date ? r.created_at.toISOString() : (r.created_at as string),
+    updated_at: r.updated_at instanceof Date ? r.updated_at.toISOString() : (r.updated_at as string),
+    entry_count: r.entry_count as number,
+  }));
+};
+
+export const createEvalDataset = async (
+  projectId: string,
+  name: string,
+  description?: string,
+): Promise<EvalDatasetRow> => {
+  await ensureEvalDatasetsTable();
+  const result = await pgPool.query(
+    `
+      INSERT INTO eval_datasets (project_id, name, description)
+      VALUES ($1, $2, $3)
+      RETURNING id, project_id, name, description, created_at, updated_at
+    `,
+    [projectId, name, description ?? null],
+  );
+  const r = result.rows[0];
+  return {
+    id: r.id as string,
+    project_id: r.project_id as string,
+    name: r.name as string,
+    description: r.description as string | null,
+    created_at: r.created_at instanceof Date ? r.created_at.toISOString() : (r.created_at as string),
+    updated_at: r.updated_at instanceof Date ? r.updated_at.toISOString() : (r.updated_at as string),
+    entry_count: 0,
+  };
+};
+
+export const deleteEvalDataset = async (projectId: string, datasetId: string): Promise<void> => {
+  await ensureEvalDatasetsTable();
+  await pgPool.query(
+    `DELETE FROM eval_datasets WHERE id = $1 AND project_id = $2`,
+    [datasetId, projectId],
+  );
+};
+
+export const getEvalDatasetWithEntries = async (
+  projectId: string,
+  datasetId: string,
+): Promise<{ dataset: EvalDatasetRow; entries: EvalDatasetEntryRow[] } | null> => {
+  await ensureEvalDatasetsTable();
+
+  const datasetResult = await pgPool.query(
+    `
+      SELECT d.id, d.project_id, d.name, d.description, d.created_at, d.updated_at,
+             COUNT(e.id)::int AS entry_count
+      FROM eval_datasets d
+      LEFT JOIN eval_dataset_entries e ON e.dataset_id = d.id
+      WHERE d.id = $1 AND d.project_id = $2
+      GROUP BY d.id
+    `,
+    [datasetId, projectId],
+  );
+  if (datasetResult.rows.length === 0) return null;
+
+  const dr = datasetResult.rows[0];
+  const dataset: EvalDatasetRow = {
+    id: dr.id as string,
+    project_id: dr.project_id as string,
+    name: dr.name as string,
+    description: dr.description as string | null,
+    created_at: dr.created_at instanceof Date ? dr.created_at.toISOString() : (dr.created_at as string),
+    updated_at: dr.updated_at instanceof Date ? dr.updated_at.toISOString() : (dr.updated_at as string),
+    entry_count: dr.entry_count as number,
+  };
+
+  const entriesResult = await pgPool.query(
+    `
+      SELECT
+        e.id, e.dataset_id, e.trace_id, e.label, e.note, e.added_at,
+        t.root_span_name, t.started_at, t.status,
+        t.duration_ms, t.total_cost_usd, t.agent_count, t.framework
+      FROM eval_dataset_entries e
+      LEFT JOIN traces t ON t.trace_id = e.trace_id
+      WHERE e.dataset_id = $1
+      ORDER BY e.added_at DESC
+    `,
+    [datasetId],
+  );
+
+  const entries: EvalDatasetEntryRow[] = entriesResult.rows.map((r) => ({
+    id: r.id as string,
+    dataset_id: r.dataset_id as string,
+    trace_id: r.trace_id as string,
+    label: r.label as "pass" | "fail" | null,
+    note: r.note as string | null,
+    added_at: r.added_at instanceof Date ? r.added_at.toISOString() : (r.added_at as string),
+    root_span_name: r.root_span_name as string | null,
+    started_at: r.started_at instanceof Date ? r.started_at.toISOString() : (r.started_at as string | null),
+    status: r.status as string | null,
+    duration_ms: r.duration_ms as number | null,
+    total_cost_usd: r.total_cost_usd as number | null,
+    agent_count: r.agent_count as number | null,
+    framework: r.framework as string[] | null,
+  }));
+
+  return { dataset, entries };
+};
+
+export const addEvalDatasetEntry = async (
+  datasetId: string,
+  traceId: string,
+  label?: "pass" | "fail",
+  note?: string,
+): Promise<void> => {
+  await ensureEvalDatasetsTable();
+  await pgPool.query(
+    `
+      INSERT INTO eval_dataset_entries (dataset_id, trace_id, label, note)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (dataset_id, trace_id) DO UPDATE SET
+        label = COALESCE(EXCLUDED.label, eval_dataset_entries.label),
+        note = COALESCE(EXCLUDED.note, eval_dataset_entries.note)
+    `,
+    [datasetId, traceId, label ?? null, note ?? null],
+  );
+};
+
+export const removeEvalDatasetEntry = async (datasetId: string, traceId: string): Promise<void> => {
+  await ensureEvalDatasetsTable();
+  await pgPool.query(
+    `DELETE FROM eval_dataset_entries WHERE dataset_id = $1 AND trace_id = $2`,
+    [datasetId, traceId],
+  );
+};
+
+// ─── Pending Invites ───────────────────────────────────────────────────────────
+
 let pendingInvitesTableEnsured = false;
 
 const ensurePendingInvitesTable = async () => {

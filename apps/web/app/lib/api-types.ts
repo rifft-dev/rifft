@@ -391,3 +391,35 @@ export type OptimizationSuggestionsResult = {
   traces_analyzed: number;
   days_analyzed: number;
 };
+
+export type EvalDataset = {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+  entry_count: number;
+};
+
+export type EvalDatasetEntry = {
+  id: string;
+  dataset_id: string;
+  trace_id: string;
+  label: "pass" | "fail" | null;
+  note: string | null;
+  added_at: string;
+  // joined trace fields
+  root_span_name: string | null;
+  started_at: string | null;
+  status: string | null;
+  duration_ms: number | null;
+  total_cost_usd: number | null;
+  agent_count: number | null;
+  framework: string[] | null;
+};
+
+export type EvalDatasetDetail = {
+  dataset: EvalDataset;
+  entries: EvalDatasetEntry[];
+};

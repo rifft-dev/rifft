@@ -52,6 +52,12 @@ import {
   getOptimizationSuggestions,
   getTraceAttributeCorrelations,
   getAgentFailureDiff,
+  listEvalDatasets,
+  createEvalDataset,
+  deleteEvalDataset,
+  getEvalDatasetWithEntries,
+  addEvalDatasetEntry,
+  removeEvalDatasetEntry,
 } from "./queries.js";
 
 const port = Number(process.env.PORT ?? 4000);
@@ -2249,6 +2255,81 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
       return { error: result.reason };
     }
 
+    return { ok: true };
+  });
+
+  // ─── Eval Datasets ────────────────────────────────────────────────────────────
+
+  // List datasets for a project
+  app.get("/projects/:id/eval-datasets", async (request, reply) => {
+    const user = await resolvedDeps.getUser(request);
+    if (!user) { reply.code(401); return { error: "unauthorized" }; }
+    const { id: projectId } = request.params as { id: string };
+    const project = await getAccessibleProject(user.id, projectId);
+    if (!project) { reply.code(403); return { error: "forbidden" }; }
+    const datasets = await listEvalDatasets(projectId);
+    return { datasets };
+  });
+
+  // Create a dataset
+  app.post("/projects/:id/eval-datasets", async (request, reply) => {
+    const user = await resolvedDeps.getUser(request);
+    if (!user) { reply.code(401); return { error: "unauthorized" }; }
+    const { id: projectId } = request.params as { id: string };
+    const project = await getAccessibleProject(user.id, projectId);
+    if (!project) { reply.code(403); return { error: "forbidden" }; }
+    const body = request.body as { name?: string; description?: string };
+    if (!body.name?.trim()) { reply.code(400); return { error: "name is required" }; }
+    const dataset = await createEvalDataset(projectId, body.name.trim(), body.description);
+    reply.code(201);
+    return { dataset };
+  });
+
+  // Get a single dataset with entries
+  app.get("/projects/:id/eval-datasets/:datasetId", async (request, reply) => {
+    const user = await resolvedDeps.getUser(request);
+    if (!user) { reply.code(401); return { error: "unauthorized" }; }
+    const { id: projectId, datasetId } = request.params as { id: string; datasetId: string };
+    const project = await getAccessibleProject(user.id, projectId);
+    if (!project) { reply.code(403); return { error: "forbidden" }; }
+    const result = await getEvalDatasetWithEntries(projectId, datasetId);
+    if (!result) { reply.code(404); return { error: "not_found" }; }
+    return result;
+  });
+
+  // Delete a dataset
+  app.delete("/projects/:id/eval-datasets/:datasetId", async (request, reply) => {
+    const user = await resolvedDeps.getUser(request);
+    if (!user) { reply.code(401); return { error: "unauthorized" }; }
+    const { id: projectId, datasetId } = request.params as { id: string; datasetId: string };
+    const project = await getAccessibleProject(user.id, projectId);
+    if (!project) { reply.code(403); return { error: "forbidden" }; }
+    await deleteEvalDataset(projectId, datasetId);
+    return { ok: true };
+  });
+
+  // Add a trace to a dataset
+  app.post("/projects/:id/eval-datasets/:datasetId/entries", async (request, reply) => {
+    const user = await resolvedDeps.getUser(request);
+    if (!user) { reply.code(401); return { error: "unauthorized" }; }
+    const { id: projectId, datasetId } = request.params as { id: string; datasetId: string };
+    const project = await getAccessibleProject(user.id, projectId);
+    if (!project) { reply.code(403); return { error: "forbidden" }; }
+    const body = request.body as { traceId?: string; label?: "pass" | "fail"; note?: string };
+    if (!body.traceId) { reply.code(400); return { error: "traceId is required" }; }
+    await addEvalDatasetEntry(datasetId, body.traceId, body.label, body.note);
+    reply.code(201);
+    return { ok: true };
+  });
+
+  // Remove a trace from a dataset
+  app.delete("/projects/:id/eval-datasets/:datasetId/entries/:traceId", async (request, reply) => {
+    const user = await resolvedDeps.getUser(request);
+    if (!user) { reply.code(401); return { error: "unauthorized" }; }
+    const { id: projectId, datasetId, traceId } = request.params as { id: string; datasetId: string; traceId: string };
+    const project = await getAccessibleProject(user.id, projectId);
+    if (!project) { reply.code(403); return { error: "forbidden" }; }
+    await removeEvalDatasetEntry(datasetId, traceId);
     return { ok: true };
   });
 

@@ -14,6 +14,7 @@ import { getMastMeta } from "@/lib/mast";
 import { Button } from "@/components/ui/button";
 import { InteractiveTraceDetail } from "./interactive-trace-detail";
 import { SetBaselineButton } from "./set-baseline-button";
+import { SaveToDatasetButton } from "./save-to-dataset-button";
 import { PartialFailureBanner } from "@/components/partial-failure-banner";
 
 const fallbackAgentDetail = (
@@ -137,12 +138,12 @@ export default async function TraceDetailPage({
           <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
             <div className="space-y-4">
               <div className="space-y-2">
-               <h1 className="text-3xl font-semibold tracking-tight lg:text-4xl">
-  {trace.root_span_name ?? trace.trace_id}
-</h1>
-{trace.root_span_name ? (
-  <p className="font-mono text-xs text-muted-foreground">{trace.trace_id}</p>
-) : null}
+                <h1 className="font-display text-3xl font-medium lg:text-4xl">
+                  {trace.root_span_name ?? trace.trace_id}
+                </h1>
+                {trace.root_span_name ? (
+                  <p className="font-mono text-xs text-muted-foreground">{trace.trace_id}</p>
+                ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
                 <Badge variant={trace.status === "error" ? "destructive" : "secondary"}>
@@ -153,26 +154,30 @@ export default async function TraceDetailPage({
               </div>
               <div className="flex flex-wrap gap-3">
                 <SetBaselineButton
-  traceId={trace.trace_id}
-  isCurrentBaseline={isCurrentBaseline}
-  canUpdate={projectSettings.permissions.can_update_settings}
-/>
+                  traceId={trace.trace_id}
+                  isCurrentBaseline={isCurrentBaseline}
+                  canUpdate={projectSettings.permissions.can_update_settings}
+                />
+                <SaveToDatasetButton
+                  traceId={trace.trace_id}
+                  projectId={projectSettings.id}
+                />
               </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
               {hasIncidentContext ? (
                 <>
-                  <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-4">
-                    <div className="flex items-center gap-2 text-sm font-medium text-destructive">
-                      <AlertTriangle className="h-4 w-4" />
+                  <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
+                    <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-destructive">
+                      <AlertTriangle className="h-3.5 w-3.5" />
                       Root cause
                     </div>
                     <div className="mt-2 font-mono text-sm">{rootCauseAgent}</div>
                     <div className="mt-1 text-xs text-muted-foreground">{primaryFailure}</div>
                   </div>
-                  <div className="rounded-2xl border bg-muted/40 p-4">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <GitBranch className="h-4 w-4" />
+                  <div className="rounded-2xl border bg-muted/30 p-4">
+                    <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
+                      <GitBranch className="h-3.5 w-3.5" />
                       Failing agent
                     </div>
                     <div className="mt-2 font-mono text-sm">{failingAgent}</div>

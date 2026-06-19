@@ -97,8 +97,8 @@ export default async function WorkspacePage() {
       {hasNoTraces ? (
         <section className="rounded-[2rem] border bg-[radial-gradient(circle_at_top_left,hsl(var(--chart-1))/0.12,transparent_28%),hsl(var(--card))] p-8 shadow-sm">
           <div className="max-w-3xl space-y-5">
-            <Badge variant="outline">Workspace</Badge>
-            <h1 className="text-4xl font-semibold tracking-tight lg:text-5xl">
+            <Badge variant="outline" className="font-display text-[10px] uppercase tracking-[0.12em]">Workspace</Badge>
+            <h1 className="font-display text-4xl font-medium lg:text-5xl">
               Waiting for your first trace.
             </h1>
             <p className="text-lg text-muted-foreground">
@@ -133,9 +133,9 @@ export default async function WorkspacePage() {
       <section className="section-fade overflow-hidden rounded-[2rem] border bg-[radial-gradient(circle_at_top_left,hsl(var(--destructive))/0.14,transparent_28%),radial-gradient(circle_at_top_right,hsl(var(--chart-1))/0.14,transparent_30%),hsl(var(--card))] p-8 shadow-sm">
         <div className="grid gap-8 xl:grid-cols-[1.2fr_0.8fr]">
           <div className="space-y-5">
-            <Badge variant="outline">Incident triage</Badge>
+            <Badge variant="outline" className="font-display text-[10px] uppercase tracking-[0.12em]">Incident triage</Badge>
             <div className="space-y-4">
-              <h1 className="max-w-4xl text-4xl font-semibold tracking-tight lg:text-6xl">
+              <h1 className="font-display max-w-4xl text-4xl font-medium lg:text-6xl">
                 See which run needs you next.
               </h1>
               <p className="max-w-2xl text-lg text-muted-foreground">
@@ -162,8 +162,8 @@ export default async function WorkspacePage() {
                 nextTraceToneCard ?? "border-destructive/30 bg-background/65"
               }`}
             >
-              <div className="flex items-center gap-2 text-sm font-medium text-destructive">
-                <AlertTriangle className="h-4 w-4" />
+              <div className="flex items-center gap-2 font-display text-[10px] font-medium uppercase tracking-[0.12em] text-destructive">
+                <AlertTriangle className="h-3.5 w-3.5" />
                 Next incident
               </div>
               {latestFailingTrace ? (
@@ -196,8 +196,8 @@ export default async function WorkspacePage() {
       <section className="stagger-1 section-fade">
         <Card className="surface-lift rounded-3xl shadow-sm">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <AlertTriangle className="h-5 w-5 text-destructive" />
+            <CardTitle className="font-display flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
+              <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
               Open first
             </CardTitle>
           </CardHeader>
@@ -238,8 +238,8 @@ export default async function WorkspacePage() {
       <section className="stagger-1 section-fade">
         <Card className="surface-lift rounded-3xl shadow-sm">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Flag className="h-5 w-5" />
+            <CardTitle className="font-display flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
+              <Flag className="h-3.5 w-3.5" />
               Before / after reference
             </CardTitle>
           </CardHeader>
@@ -389,8 +389,8 @@ export default async function WorkspacePage() {
       <section className="stagger-2 section-fade space-y-4">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-2">
-            <Badge variant="outline">What should I fix first?</Badge>
-            <h2 className="text-2xl font-semibold tracking-tight lg:text-3xl">
+            <Badge variant="outline" className="font-display text-[10px] uppercase tracking-[0.12em]">What should I fix first?</Badge>
+            <h2 className="font-display text-2xl font-medium lg:text-3xl">
               Recurring failure patterns across recent traces
             </h2>
             <p className="max-w-3xl text-sm text-muted-foreground">
@@ -434,7 +434,7 @@ export default async function WorkspacePage() {
                       </Badge>
                     </div>
                     <div className="space-y-2">
-                      <CardTitle className="text-xl">{meta.label}</CardTitle>
+                      <CardTitle className="font-display text-xl font-medium">{meta.label}</CardTitle>
                       <p className="text-sm text-muted-foreground">
                         Seen in {insight.affected_trace_count} of the last{" "}
                         {insight.recent_trace_window} traces ({formatPercentage(insight.share_of_recent_traces)}).
@@ -541,8 +541,8 @@ export default async function WorkspacePage() {
       <section className="stagger-2 section-fade">
         <Card className="surface-lift rounded-3xl shadow-sm">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Workflow className="h-5 w-5" />
+            <CardTitle className="font-display flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
+              <Workflow className="h-3.5 w-3.5" />
               Recent trace activity
             </CardTitle>
           </CardHeader>
