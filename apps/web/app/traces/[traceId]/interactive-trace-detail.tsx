@@ -878,50 +878,6 @@ export function InteractiveTraceDetail({
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_380px]">
           <div className="space-y-6">
-            {focusMessage ? (
-              <Card className="rounded-3xl border-chart-1/25 bg-[radial-gradient(circle_at_top_left,hsl(var(--chart-1))/0.08,transparent_36%),hsl(var(--card))] shadow-sm">
-                <CardContent className="space-y-4 p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                        First bad handoff
-                      </div>
-                      <div className="font-mono text-sm">
-                        {focusMessage.source_agent_id} {"→"} {focusMessage.target_agent_id}
-                      </div>
-                      <p className="max-w-2xl text-sm text-muted-foreground">
-                        Start here. This is the earliest recorded message in the replay path, so it is the best place to inspect where the conversation first drifted.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={() => openMessageOverlay(focusMessage.span_id, focusMessage.target_agent_id)}
-                      >
-                        Inspect handoff
-                      </Button>
-                      <Button
-                        onClick={() => {
-                          openForkDialog(focusMessage, focusDraft);
-                        }}
-                      >
-                        Try a fix
-                      </Button>
-                    </div>
-                  </div>
-                  {focusPayloadHints.length > 0 ? (
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      {focusPayloadHints.map((hint) => (
-                        <div key={hint} className="rounded-2xl border bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
-                          {hint}
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </CardContent>
-              </Card>
-            ) : null}
-
             {liveState.isLive || liveState.sessionExpired ? (
             <Card className="section-fade rounded-2xl border border-chart-1/25 bg-[radial-gradient(circle_at_left,hsl(var(--chart-1))/0.1,transparent_40%),hsl(var(--card))]">
               <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
@@ -963,14 +919,11 @@ export function InteractiveTraceDetail({
 
               <TabsContent value="graph" className="mt-0">
                 <Card className="overflow-hidden rounded-3xl border-border/70 bg-card/85 p-0 shadow-sm backdrop-blur-sm">
-                  <div className="flex items-center justify-between border-b px-6 py-4">
-                    <div>
-                      <div className="text-sm font-medium">Conversation path</div>
-                    </div>
-                    {trace.mast_failures.length > 0 ? (
+                  {trace.mast_failures.length > 0 ? (
+                    <div className="flex items-center justify-end border-b px-6 py-3">
                       <Badge variant="destructive">{trace.mast_failures.length} failure(s) detected</Badge>
-                    ) : null}
-                  </div>
+                    </div>
+                  ) : null}
                   <div className="relative graph-tab-height bg-[radial-gradient(circle_at_top,hsl(var(--muted))/0.3,transparent_45%)]">
                     <div className="pointer-events-none absolute left-6 top-4 z-10 flex items-center gap-2">
                       {replayMode ? (
@@ -1048,7 +1001,7 @@ export function InteractiveTraceDetail({
                       {replayMode ? (
                         <>
                           <span className="px-2 text-xs text-muted-foreground hidden sm:inline">
-                            Stepping through agent handoffs
+                            Walking recorded handoffs
                           </span>
                           <div className="hidden sm:block h-4 w-px bg-border" />
                           <Button variant="outline" disabled={!canStepReplayBack} onClick={() => stepReplay(-1)}>
@@ -1068,7 +1021,7 @@ export function InteractiveTraceDetail({
                       ) : (
                         <Button onClick={enterReplayMode}>
                           <Play className="h-4 w-4" />
-                          Step through messages
+                          Walk handoffs
                         </Button>
                       )}
                     </div>
@@ -1132,33 +1085,6 @@ export function InteractiveTraceDetail({
                     <div className="grid gap-3">
                       <Card className="shadow-none">
                         <CardHeader>
-                          <CardTitle className="text-base">Longest-running agents</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-3">
-                          {timelineRows.map((entry) => (
-                            <button
-                              key={entry.agent_id}
-                              type="button"
-                              onClick={() => openAgent(entry.agent_id)}
-                              onMouseEnter={() => setHoveredAgentId(entry.agent_id)}
-                              onMouseLeave={() => setHoveredAgentId(null)}
-                              className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors hover:bg-muted/40 ${
-                                hoveredAgentId === entry.agent_id ? "bg-muted/40 border-border" : ""
-                              }`}
-                            >
-                              <div>
-                                <div className="font-mono text-sm">{entry.agent_id}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  {entry.start_ms}ms to {entry.end_ms}ms
-                                </div>
-                              </div>
-                              <Badge variant={statusVariant(entry.status)}>{entry.duration_ms}ms</Badge>
-                            </button>
-                          ))}
-                        </CardContent>
-                      </Card>
-                      <Card className="shadow-none">
-                        <CardHeader>
                           <CardTitle className="text-base">Communication events</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-3">
@@ -1204,7 +1130,8 @@ export function InteractiveTraceDetail({
           </div>
 
           <div className="space-y-4">
-            {trace.communication_spans.length > 0 ? (
+            {/* Handoff inspector — only show when a message is selected or the trace has failures */}
+            {(selectedMessage ?? (trace.mast_failures.length > 0 ? focusMessage : null)) ? (
             <>
             <Card className="rounded-3xl border-border/50 shadow-sm">
               <CardHeader className="pb-3">
@@ -1225,11 +1152,6 @@ export function InteractiveTraceDetail({
                       <div className="text-sm font-medium">
                         {focusMessage.source_agent_id} {"→"} {focusMessage.target_agent_id}
                       </div>
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        {selectedMessage
-                          ? "You are inspecting the currently selected handoff."
-                          : "No handoff is selected yet, so Rifft is showing the first message in the replay path."}
-                      </p>
                     </div>
                     <div className="rounded-2xl border bg-muted/20 p-4">
                       <div className="mb-2 text-sm font-medium">What this agent passed on</div>
@@ -1251,46 +1173,37 @@ export function InteractiveTraceDetail({
                       </Button>
                       <Button
                         variant="outline"
-                        onClick={() => {
-                          openForkDialog(focusMessage, focusDraft);
-                        }}
+                        onClick={() => openForkDialog(focusMessage, focusDraft)}
                       >
                         Try a fix
                       </Button>
                     </div>
                   </>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    Select a connection in the conversation path to inspect the message.
-                  </p>
-                )}
+                ) : null}
               </CardContent>
             </Card>
 
+            {/* "What changed here" — only render when there are actual hints */}
+            {focusPayloadHints.length > 0 ? (
             <Card className="rounded-3xl border-border/50 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base font-medium text-muted-foreground">
-                  <ShieldAlert className="h-4 w-4" />
+                  <CircleAlert className="h-4 w-4" />
                   What changed here
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {focusPayloadHints.length > 0 ? (
-                  focusPayloadHints.map((hint) => (
-                    <div key={hint} className="rounded-2xl border p-4 text-sm text-muted-foreground">
-                      {hint}
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    {focusMessage
-                      ? "Rifft does not have a compact change summary for this handoff yet."
-                      : "Select a connection in the graph to see what changed."}
-                  </p>
-                )}
+                {focusPayloadHints.map((hint) => (
+                  <div key={hint} className="rounded-2xl border p-4 text-sm text-muted-foreground">
+                    {hint}
+                  </div>
+                ))}
               </CardContent>
             </Card>
+            ) : null}
 
+            {/* "What happened next" — only render when there are actual failures on this path */}
+            {selectedPathFailures.length > 0 ? (
             <Card className="rounded-3xl border-border/50 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base font-medium text-muted-foreground">
@@ -1299,27 +1212,20 @@ export function InteractiveTraceDetail({
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {selectedPathFailures.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    {focusMessage
-                      ? "Rifft has not attached a downstream failure summary to this handoff yet."
-                      : "Select a connection in the graph to see what happened next."}
-                  </p>
-                ) : (
-                  selectedPathFailures.map((failure) => (
-                    <div key={`${failure.mode}-${failure.agent_id ?? "trace"}`} className="rounded-2xl border p-4">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium">{getMastMeta(failure.mode).label}</span>
-                        <Badge variant={failure.severity === "fatal" ? "destructive" : "outline"}>
-                          {failure.severity}
-                        </Badge>
-                      </div>
-                      <p className="mt-2 text-sm text-muted-foreground">{failure.explanation}</p>
+                {selectedPathFailures.map((failure) => (
+                  <div key={`${failure.mode}-${failure.agent_id ?? "trace"}`} className="rounded-2xl border p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium">{getMastMeta(failure.mode).label}</span>
+                      <Badge variant={failure.severity === "fatal" ? "destructive" : "outline"}>
+                        {failure.severity}
+                      </Badge>
                     </div>
-                  ))
-                )}
+                    <p className="mt-2 text-sm text-muted-foreground">{failure.explanation}</p>
+                  </div>
+                ))}
               </CardContent>
             </Card>
+            ) : null}
             </>
             ) : null}
           </div>
