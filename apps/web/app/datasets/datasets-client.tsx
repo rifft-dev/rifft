@@ -19,7 +19,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+
 import { Textarea } from "@/components/ui/textarea";
 
 export function DatasetsClient({ datasets: initial }: { datasets: EvalDataset[] }) {
@@ -88,7 +88,7 @@ export function DatasetsClient({ datasets: initial }: { datasets: EvalDataset[] 
             </DialogHeader>
             <div className="space-y-4 py-2">
               <div className="space-y-1.5">
-                <Label htmlFor="ds-name">Name</Label>
+                <label htmlFor="ds-name" className="text-sm font-medium">Name</label>
                 <Input
                   id="ds-name"
                   placeholder="e.g. Checkout agent regressions"
@@ -98,7 +98,7 @@ export function DatasetsClient({ datasets: initial }: { datasets: EvalDataset[] 
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="ds-desc">Description (optional)</Label>
+                <label htmlFor="ds-desc" className="text-sm font-medium">Description (optional)</label>
                 <Textarea
                   id="ds-desc"
                   placeholder="What this dataset covers..."

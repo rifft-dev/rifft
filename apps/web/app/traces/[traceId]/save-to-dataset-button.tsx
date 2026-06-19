@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -168,7 +168,7 @@ export function SaveToDatasetButton({ traceId, projectId }: Props) {
           </DialogHeader>
           <div className="space-y-3 py-2">
             <div className="space-y-1.5">
-              <Label htmlFor="new-ds-name">Dataset name</Label>
+              <label htmlFor="new-ds-name" className="text-sm font-medium">Dataset name</label>
               <Input
                 id="new-ds-name"
                 placeholder="e.g. Checkout agent regressions"
