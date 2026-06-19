@@ -133,10 +133,10 @@ export default async function HomePage({
         {/* ── Nav ── */}
         <nav className="hp-nav">
           <div className="hp-nav-left">
-            <a href="/" className="hp-logo">
+            <Link href="/" className="hp-logo">
               RIFFT
               <span className="hp-reg">BETA</span>
-            </a>
+            </Link>
             <div className="hp-nav-links">
               <a href="#product">Product</a>
               <a href="#quickstart">Quickstart</a>
