@@ -60,10 +60,13 @@ type ExecutionContext = {
   currentFramework: Framework;
 };
 
+export type EvalLabel = "pass" | "fail";
+
 export type RifftSpan = {
   setAttribute: (key: string, value: unknown) => void;
   captureDecision: (payload: DecisionPayload) => void;
   addEvent: (name: string, attributes?: Record<string, unknown>) => void;
+  setEvalLabel: (label: EvalLabel) => void;
   end: () => Promise<void>;
   run: <T>(callback: () => T | Promise<T>) => T | Promise<T>;
 };
@@ -251,6 +254,10 @@ class SpanHandle implements RifftSpan {
     this.setAttribute("rifft.decision", payload);
   }
 
+  setEvalLabel(label: EvalLabel) {
+    this.record.attributes.set("rifft.eval.label", label);
+  }
+
   addEvent(name: string, attributes: Record<string, unknown> = {}) {
     this.record.events.push({
       name,
@@ -360,6 +367,23 @@ export const getConfig = () => config;
 export const getCurrentAgentId = () => storage.getStore()?.currentAgentId ?? null;
 
 export const getCurrentFramework = () => storage.getStore()?.currentFramework ?? null;
+
+/**
+ * Set the eval label on the current active span.
+ * Rifft will propagate this label to any eval dataset entries that contain this trace.
+ *
+ * @example
+ * const result = await myAgent.run(input);
+ * rifft.setEvalLabel(result.correct ? "pass" : "fail");
+ */
+export const setEvalLabel = (label: EvalLabel): void => {
+  const ctx = storage.getStore();
+  if (!ctx) return;
+  const span = ctx.trace.spans.find((s) => s.spanId === ctx.currentSpanId);
+  if (span) {
+    span.attributes.set("rifft.eval.label", label);
+  }
+};
 
 export const getCurrentTraceContext = () => {
   const current = storage.getStore();

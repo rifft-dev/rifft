@@ -25,6 +25,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 _MAX_VALUE_LENGTH = 2048
 _CURRENT_AGENT_ID: ContextVar[Optional[str]] = ContextVar("rifft_current_agent_id", default=None)
 _CURRENT_FRAMEWORK: ContextVar[Optional[str]] = ContextVar("rifft_current_framework", default=None)
+_CURRENT_RIFFT_SPAN: ContextVar[Optional["_RifftSpan"]] = ContextVar("rifft_current_span", default=None)
 
 
 @dataclass
@@ -148,6 +149,7 @@ class _RifftSpan:
         self._span: Any = None
         self._agent_token: Optional[Token[Optional[str]]] = None
         self._framework_token: Optional[Token[Optional[str]]] = None
+        self._span_token: Optional[Token[Optional["_RifftSpan"]]] = None
 
     def __enter__(self) -> "_RifftSpan":
         tracer = _get_tracer()
@@ -155,6 +157,7 @@ class _RifftSpan:
         self._span = self._manager.__enter__()
         self._agent_token = _CURRENT_AGENT_ID.set(self.agent_id)
         self._framework_token = _CURRENT_FRAMEWORK.set(self.framework)
+        self._span_token = _CURRENT_RIFFT_SPAN.set(self)
         self._span.set_attribute("agent_id", self.agent_id)
         self._span.set_attribute("framework", self.framework)
         self._span.set_attribute("project_id", _require_config().project_id)
@@ -175,6 +178,8 @@ class _RifftSpan:
             _CURRENT_FRAMEWORK.reset(self._framework_token)
         if self._agent_token is not None:
             _CURRENT_AGENT_ID.reset(self._agent_token)
+        if self._span_token is not None:
+            _CURRENT_RIFFT_SPAN.reset(self._span_token)
 
     def set_attribute(self, key: str, value: Any) -> None:
         if self._span is None:
@@ -199,6 +204,22 @@ class _RifftSpan:
             "reasoning": reasoning,
         }
         self.set_attribute("rifft.decision", payload)
+
+    def set_eval_label(self, label: str) -> None:
+        """Set the eval outcome for this trace. ``label`` must be ``"pass"`` or ``"fail"``.
+
+        Rifft will propagate this label to any eval dataset entries that contain
+        this trace, so you never have to label runs manually after the fact.
+
+        Example::
+
+            with rifft.span("checkout-agent", agent_id="checkout") as s:
+                result = run_checkout(order)
+                s.set_eval_label("pass" if result.success else "fail")
+        """
+        if label not in ("pass", "fail"):
+            raise ValueError(f"eval label must be 'pass' or 'fail', got {label!r}")
+        self.set_attribute("rifft.eval.label", label)
 
 
 _config: Optional[_Config] = None
@@ -340,6 +361,27 @@ def get_current_agent_id() -> Optional[str]:
 
 def get_current_framework() -> Optional[str]:
     return _CURRENT_FRAMEWORK.get()
+
+
+def set_eval_label(label: str) -> None:
+    """Set the eval outcome on the currently active Rifft span.
+
+    Rifft propagates this label to any eval dataset entries that contain this
+    trace, so runs label themselves and you never have to click through the UI.
+
+    Args:
+        label: ``"pass"`` or ``"fail"``.
+
+    Example::
+
+        result = await run_agent(inputs)
+        rifft.set_eval_label("pass" if result.correct else "fail")
+    """
+    if label not in ("pass", "fail"):
+        raise ValueError(f"eval label must be 'pass' or 'fail', got {label!r}")
+    current = _CURRENT_RIFFT_SPAN.get()
+    if current is not None:
+        current.set_eval_label(label)
 
 
 def init(

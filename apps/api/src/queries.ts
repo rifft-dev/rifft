@@ -541,6 +541,10 @@ const ensureProjectAlerts = async () => {
     ADD COLUMN IF NOT EXISTS alert_email TEXT
   `);
   await pgPool.query(`
+    ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS eval_webhook_url TEXT
+  `);
+  await pgPool.query(`
     CREATE TABLE IF NOT EXISTS project_alert_deliveries (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -3207,6 +3211,23 @@ export const getProjectIdForApiKey = async (token: string): Promise<string | nul
     void pgPool.query(`UPDATE api_keys SET last_used_at = NOW() WHERE token = $1`, [token]);
   }
   return projectId;
+};
+
+export const getEvalWebhookUrl = async (projectId: string): Promise<string | null> => {
+  await ensureProjectAlerts();
+  const result = await pgPool.query<{ eval_webhook_url: string | null }>(
+    `SELECT eval_webhook_url FROM projects WHERE id = $1 LIMIT 1`,
+    [projectId],
+  );
+  return result.rows[0]?.eval_webhook_url ?? null;
+};
+
+export const setEvalWebhookUrl = async (projectId: string, url: string | null): Promise<void> => {
+  await ensureProjectAlerts();
+  await pgPool.query(
+    `UPDATE projects SET eval_webhook_url = $2 WHERE id = $1`,
+    [projectId, url],
+  );
 };
 
 // ─── Pending Invites ───────────────────────────────────────────────────────────

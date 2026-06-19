@@ -73,6 +73,7 @@ export type TraceSummary = {
   agentCount: number;
   spanCount: number;
   totalCostUsd: number;
+  evalLabel: "pass" | "fail" | null;
 };
 
 type NormalizeOptions = {
@@ -246,6 +247,7 @@ export const normalizeEnvelope = (envelope: OtlpEnvelope, options: NormalizeOpti
         agentCount: span.agent_id === "unknown" ? 0 : 1,
         spanCount: 1,
         totalCostUsd: span.numericCostUsd,
+        evalLabel: null,
       });
       continue;
     }
@@ -280,11 +282,20 @@ export const normalizeEnvelope = (envelope: OtlpEnvelope, options: NormalizeOpti
 
     summary.agentCount = agentIds.size;
 
+    const rootSpan = spans.find(
+      (span) => span.trace_id === traceId && (!span.parent_span_id || span.parent_span_id.length === 0),
+    );
+
     if (!summary.rootSpanName) {
-      const rootSpan = spans.find(
-        (span) => span.trace_id === traceId && (!span.parent_span_id || span.parent_span_id.length === 0),
-      );
       summary.rootSpanName = rootSpan?.name ?? null;
+    }
+
+    if (rootSpan && !summary.evalLabel) {
+      const attrs = JSON.parse(rootSpan.attributes) as Record<string, unknown>;
+      const rawLabel = attrs["rifft.eval.label"];
+      if (rawLabel === "pass" || rawLabel === "fail") {
+        summary.evalLabel = rawLabel;
+      }
     }
 
     const traceSpans = spans.filter((span) => span.trace_id === traceId);

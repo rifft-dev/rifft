@@ -60,6 +60,8 @@ import {
   removeEvalDatasetEntry,
   queryEvalDatasetForCI,
   getProjectIdForApiKey,
+  getEvalWebhookUrl,
+  setEvalWebhookUrl,
 } from "./queries.js";
 
 const port = Number(process.env.PORT ?? 4000);
@@ -2372,11 +2374,40 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
 
     if (!result) { reply.code(404); return { error: "not_found" }; }
 
+    // Fire webhook asynchronously on fail — don't block the response
+    if (result.verdict === "fail") {
+      void getEvalWebhookUrl(projectId).then((webhookUrl) => {
+        if (!webhookUrl) return;
+        const body = JSON.stringify({
+          event: "eval.fail",
+          ...result,
+          timestamp: new Date().toISOString(),
+        });
+        fetch(webhookUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body,
+        }).catch(() => { /* best-effort */ });
+      });
+    }
+
     // Return 200 for pass/needs_review, 422 for fail — lets curl/wget exit non-zero
     if (result.verdict === "fail") {
       reply.code(422);
     }
     return result;
+  });
+
+  // Configure webhook URL for eval CI notifications
+  app.patch("/projects/:id/eval-webhook", async (request, reply) => {
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
+    if (!user) { reply.code(401); return { error: "unauthorized" }; }
+    const { id: projectId } = request.params as { id: string };
+    const project = await getAccessibleProject(user.id, projectId);
+    if (!project) { reply.code(403); return { error: "forbidden" }; }
+    const body = request.body as { webhook_url?: string | null };
+    await setEvalWebhookUrl(projectId, body.webhook_url ?? null);
+    return { ok: true };
   });
 
   return app;

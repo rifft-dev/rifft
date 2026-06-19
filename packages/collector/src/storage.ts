@@ -30,6 +30,7 @@ type TraceSummary = {
   agentCount: number;
   spanCount: number;
   totalCostUsd: number;
+  evalLabel: "pass" | "fail" | null;
 };
 
 type CloudPlanPolicy = {
@@ -499,6 +500,22 @@ export const upsertTraceSummary = async (summary: TraceSummary) => {
       summary.totalCostUsd,
     ],
   );
+
+  // Propagate SDK-set eval label to any dataset entries for this trace.
+  // Only overwrites entries that are currently unlabelled — manual labels win.
+  if (summary.evalLabel) {
+    await pgPool.query(
+      `
+        UPDATE eval_dataset_entries
+        SET label = $1
+        WHERE trace_id = $2
+          AND label IS NULL
+      `,
+      [summary.evalLabel, summary.traceId],
+    ).catch(() => {
+      // eval_datasets table may not exist yet on fresh deployments — safe to ignore
+    });
+  }
 };
 
 export const updateTraceFailures = async (traceId: string, failures: unknown[]) => {
