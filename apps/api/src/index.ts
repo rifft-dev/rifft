@@ -2262,7 +2262,7 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
 
   // List datasets for a project
   app.get("/projects/:id/eval-datasets", async (request, reply) => {
-    const user = await resolvedDeps.getUser(request);
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
     if (!user) { reply.code(401); return { error: "unauthorized" }; }
     const { id: projectId } = request.params as { id: string };
     const project = await getAccessibleProject(user.id, projectId);
@@ -2273,7 +2273,7 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
 
   // Create a dataset
   app.post("/projects/:id/eval-datasets", async (request, reply) => {
-    const user = await resolvedDeps.getUser(request);
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
     if (!user) { reply.code(401); return { error: "unauthorized" }; }
     const { id: projectId } = request.params as { id: string };
     const project = await getAccessibleProject(user.id, projectId);
@@ -2287,7 +2287,7 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
 
   // Get a single dataset with entries
   app.get("/projects/:id/eval-datasets/:datasetId", async (request, reply) => {
-    const user = await resolvedDeps.getUser(request);
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
     if (!user) { reply.code(401); return { error: "unauthorized" }; }
     const { id: projectId, datasetId } = request.params as { id: string; datasetId: string };
     const project = await getAccessibleProject(user.id, projectId);
@@ -2299,7 +2299,7 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
 
   // Delete a dataset
   app.delete("/projects/:id/eval-datasets/:datasetId", async (request, reply) => {
-    const user = await resolvedDeps.getUser(request);
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
     if (!user) { reply.code(401); return { error: "unauthorized" }; }
     const { id: projectId, datasetId } = request.params as { id: string; datasetId: string };
     const project = await getAccessibleProject(user.id, projectId);
@@ -2310,7 +2310,7 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
 
   // Add a trace to a dataset
   app.post("/projects/:id/eval-datasets/:datasetId/entries", async (request, reply) => {
-    const user = await resolvedDeps.getUser(request);
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
     if (!user) { reply.code(401); return { error: "unauthorized" }; }
     const { id: projectId, datasetId } = request.params as { id: string; datasetId: string };
     const project = await getAccessibleProject(user.id, projectId);
@@ -2324,7 +2324,7 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
 
   // Remove a trace from a dataset
   app.delete("/projects/:id/eval-datasets/:datasetId/entries/:traceId", async (request, reply) => {
-    const user = await resolvedDeps.getUser(request);
+    const user = await resolvedDeps.getAuthenticatedUser(request.headers.authorization);
     if (!user) { reply.code(401); return { error: "unauthorized" }; }
     const { id: projectId, datasetId, traceId } = request.params as { id: string; datasetId: string; traceId: string };
     const project = await getAccessibleProject(user.id, projectId);
