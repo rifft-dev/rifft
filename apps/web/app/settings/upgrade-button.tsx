@@ -61,6 +61,8 @@ const getCheckoutErrorMessage = (error?: string) => {
   }
 };
 
+const STRIPE_ENABLED = !!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+
 export function UpgradeButton({
   accountId,
   userEmail,
@@ -78,6 +80,18 @@ export function UpgradeButton({
       <p className="text-sm text-muted-foreground">
         Only the billing owner can upgrade this account.
       </p>
+    );
+  }
+
+  if (!STRIPE_ENABLED) {
+    return (
+      <div className="rounded-2xl border border-border bg-muted/20 p-6 text-center space-y-2">
+        <Crown className="mx-auto h-6 w-6 text-muted-foreground" />
+        <p className="text-sm font-medium">Paid plans coming soon</p>
+        <p className="text-xs text-muted-foreground">
+          Pro and Scale plans are not yet active. Everything is free while we&apos;re in early access.
+        </p>
+      </div>
     );
   }
 
