@@ -58,6 +58,8 @@ import {
   getEvalDatasetWithEntries,
   addEvalDatasetEntry,
   removeEvalDatasetEntry,
+  queryEvalDatasetForCI,
+  getProjectIdForApiKey,
 } from "./queries.js";
 
 const port = Number(process.env.PORT ?? 4000);
@@ -2331,6 +2333,50 @@ app.post("/traces/:traceId/failure-explanation", async (request, reply) => {
     if (!project) { reply.code(403); return { error: "forbidden" }; }
     await removeEvalDatasetEntry(datasetId, traceId);
     return { ok: true };
+  });
+
+  // CI query — accepts project API key (rft_live_...) OR user JWT
+  // Returns a verdict + counts suitable for gating a CI pipeline.
+  // Query params:
+  //   min_pass_rate   (float 0–1, default 1.0) — labelled pass rate required to pass
+  //   require_all_labelled (bool, default false) — fail if any entries are unlabelled
+  app.get("/projects/:id/eval-datasets/:datasetId/ci", async (request, reply) => {
+    const { id: projectId, datasetId } = request.params as { id: string; datasetId: string };
+    const query = request.query as Record<string, string>;
+
+    const authHeader = request.headers.authorization;
+    const bearerToken = getBearerToken(authHeader);
+
+    // Try project API key first (rft_live_... tokens)
+    if (bearerToken?.startsWith("rft_live_")) {
+      const keyProjectId = await getProjectIdForApiKey(bearerToken);
+      if (!keyProjectId) { reply.code(401); return { error: "invalid_api_key" }; }
+      if (keyProjectId !== projectId) { reply.code(403); return { error: "forbidden" }; }
+    } else {
+      // Fall back to user JWT
+      const user = await resolvedDeps.getAuthenticatedUser(authHeader);
+      if (!user) { reply.code(401); return { error: "unauthorized" }; }
+      const project = await getAccessibleProject(user.id, projectId);
+      if (!project) { reply.code(403); return { error: "forbidden" }; }
+    }
+
+    const minPassRate = query.min_pass_rate !== undefined
+      ? Math.min(1, Math.max(0, parseFloat(query.min_pass_rate)))
+      : 1.0;
+    const requireAllLabelled = query.require_all_labelled === "true";
+
+    const result = await queryEvalDatasetForCI(projectId, datasetId, {
+      minPassRate,
+      requireAllLabelled,
+    });
+
+    if (!result) { reply.code(404); return { error: "not_found" }; }
+
+    // Return 200 for pass/needs_review, 422 for fail — lets curl/wget exit non-zero
+    if (result.verdict === "fail") {
+      reply.code(422);
+    }
+    return result;
   });
 
   return app;

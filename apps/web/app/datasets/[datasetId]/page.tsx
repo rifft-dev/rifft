@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { getEvalDataset } from "../../lib/api";
+import { getEvalDataset, getProjectSettings } from "../../lib/api";
 import { requireCloudProject } from "../../lib/require-cloud-project";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,10 @@ export default async function DatasetDetailPage({
 }) {
   await requireCloudProject("/datasets");
   const { datasetId } = await params;
-  const result = await getEvalDataset(datasetId);
+  const [result, projectSettings] = await Promise.all([
+    getEvalDataset(datasetId),
+    getProjectSettings().catch(() => null),
+  ]);
   if (!result) notFound();
 
   const { dataset, entries } = result;
@@ -50,6 +53,7 @@ export default async function DatasetDetailPage({
       <DatasetDetailClient
         dataset={dataset}
         initialEntries={entries}
+        apiKey={projectSettings?.api_key ?? null}
       />
     </div>
   );

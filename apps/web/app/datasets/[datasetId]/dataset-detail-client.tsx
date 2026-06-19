@@ -3,12 +3,12 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, ExternalLink, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, Copy, ExternalLink, Terminal, Trash2, XCircle } from "lucide-react";
 import type { EvalDataset, EvalDatasetEntry } from "../../lib/api-types";
 import { removeTraceFromDataset, addTraceToDataset } from "../../lib/client-api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,9 +37,11 @@ const statusVariant = (status: string | null) => {
 export function DatasetDetailClient({
   dataset,
   initialEntries,
+  apiKey,
 }: {
   dataset: EvalDataset;
   initialEntries: EvalDatasetEntry[];
+  apiKey: string | null;
 }) {
   const router = useRouter();
   const [entries, setEntries] = useState(initialEntries);
@@ -80,8 +82,76 @@ export function DatasetDetailClient({
     );
   }
 
+  const ingestUrl = process.env.NEXT_PUBLIC_API_URL ?? "https://api.rifft.dev";
+  const key = apiKey ?? "rft_live_...";
+  const ciUrl = `${ingestUrl}/projects/${dataset.project_id}/eval-datasets/${dataset.id}/ci`;
+  const curlSnippet = `curl -sf -o /dev/null \\
+  -H "Authorization: Bearer ${key}" \\
+  "${ciUrl}"`;
+  const ghActionSnippet = `- name: Eval gate
+  run: |
+    curl -sf -o /dev/null \\
+      -H "Authorization: Bearer \${{ secrets.RIFFT_API_KEY }}" \\
+      "${ciUrl}"`;
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-6">
+      <Card className="rounded-3xl border-chart-1/25 shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="font-display flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
+            <Terminal className="h-3.5 w-3.5 text-chart-1" />
+            CI / CD gate
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Call this endpoint in CI to gate a deploy on this dataset. Returns{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">200</code> when the
+            pass rate meets the threshold,{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">422</code> when it
+            doesn&apos;t — so <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">curl -sf</code> will exit non-zero and fail the step.
+          </p>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-display text-[10px] uppercase tracking-[0.1em] text-muted-foreground">curl</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 gap-1 px-2 text-xs text-muted-foreground"
+                onClick={() => navigator.clipboard.writeText(curlSnippet)}
+              >
+                <Copy className="h-3 w-3" /> Copy
+              </Button>
+            </div>
+            <pre className="overflow-x-auto rounded-2xl bg-muted/50 p-4 text-xs leading-relaxed text-foreground">
+              <code>{curlSnippet}</code>
+            </pre>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-display text-[10px] uppercase tracking-[0.1em] text-muted-foreground">GitHub Actions</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 gap-1 px-2 text-xs text-muted-foreground"
+                onClick={() => navigator.clipboard.writeText(ghActionSnippet)}
+              >
+                <Copy className="h-3 w-3" /> Copy
+              </Button>
+            </div>
+            <pre className="overflow-x-auto rounded-2xl bg-muted/50 p-4 text-xs leading-relaxed text-foreground">
+              <code>{ghActionSnippet}</code>
+            </pre>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+            <span>Optional params:</span>
+            <code className="rounded bg-muted px-1.5 py-0.5 font-mono">?min_pass_rate=0.8</code>
+            <code className="rounded bg-muted px-1.5 py-0.5 font-mono">?require_all_labelled=true</code>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="space-y-2">
       {entries.map((entry) => {
         const displayName = entry.root_span_name ?? entry.trace_id;
         return (
@@ -164,6 +234,7 @@ export function DatasetDetailClient({
           </Card>
         );
       })}
+      </div>
     </div>
   );
 }

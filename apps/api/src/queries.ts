@@ -3115,6 +3115,100 @@ export const removeEvalDatasetEntry = async (datasetId: string, traceId: string)
   );
 };
 
+export type EvalDatasetCIResult = {
+  verdict: "pass" | "fail" | "needs_review";
+  dataset_id: string;
+  dataset_name: string;
+  total: number;
+  pass: number;
+  fail: number;
+  unlabelled: number;
+  pass_rate: number | null;
+  labelled_pass_rate: number | null;
+  thresholds: {
+    min_pass_rate: number;
+    require_all_labelled: boolean;
+  };
+};
+
+export const queryEvalDatasetForCI = async (
+  projectId: string,
+  datasetId: string,
+  opts: { minPassRate?: number; requireAllLabelled?: boolean } = {},
+): Promise<EvalDatasetCIResult | null> => {
+  await ensureEvalDatasetsTable();
+  const minPassRate = opts.minPassRate ?? 1.0;
+  const requireAllLabelled = opts.requireAllLabelled ?? false;
+
+  const dsResult = await pgPool.query<{ id: string; name: string }>(
+    `SELECT id, name FROM eval_datasets WHERE id = $1 AND project_id = $2 LIMIT 1`,
+    [datasetId, projectId],
+  );
+  if (!dsResult.rows[0]) return null;
+  const dataset = dsResult.rows[0];
+
+  const counts = await pgPool.query<{ label: string | null; cnt: string }>(
+    `SELECT label, COUNT(*) AS cnt
+       FROM eval_dataset_entries
+      WHERE dataset_id = $1
+      GROUP BY label`,
+    [datasetId],
+  );
+
+  let passCount = 0;
+  let failCount = 0;
+  let unlabelledCount = 0;
+  for (const row of counts.rows) {
+    const n = parseInt(row.cnt, 10);
+    if (row.label === "pass") passCount = n;
+    else if (row.label === "fail") failCount = n;
+    else unlabelledCount = n;
+  }
+
+  const total = passCount + failCount + unlabelledCount;
+  const labelled = passCount + failCount;
+  const passRate = total > 0 ? passCount / total : null;
+  const labelledPassRate = labelled > 0 ? passCount / labelled : null;
+
+  let verdict: "pass" | "fail" | "needs_review";
+  if (requireAllLabelled && unlabelledCount > 0) {
+    verdict = "needs_review";
+  } else if (labelledPassRate !== null && labelledPassRate < minPassRate) {
+    verdict = "fail";
+  } else if (labelled === 0) {
+    verdict = "needs_review";
+  } else {
+    verdict = "pass";
+  }
+
+  return {
+    verdict,
+    dataset_id: dataset.id,
+    dataset_name: dataset.name,
+    total,
+    pass: passCount,
+    fail: failCount,
+    unlabelled: unlabelledCount,
+    pass_rate: passRate,
+    labelled_pass_rate: labelledPassRate,
+    thresholds: { min_pass_rate: minPassRate, require_all_labelled: requireAllLabelled },
+  };
+};
+
+export const getProjectIdForApiKey = async (token: string): Promise<string | null> => {
+  await ensureApiKeysTable();
+  const result = await pgPool.query<{ project_id: string }>(
+    `SELECT project_id FROM api_keys WHERE token = $1 AND revoked_at IS NULL LIMIT 1`,
+    [token],
+  );
+  const projectId = result.rows[0]?.project_id ?? null;
+  if (projectId) {
+    // update last_used_at without blocking the response
+    void pgPool.query(`UPDATE api_keys SET last_used_at = NOW() WHERE token = $1`, [token]);
+  }
+  return projectId;
+};
+
 // ─── Pending Invites ───────────────────────────────────────────────────────────
 
 let pendingInvitesTableEnsured = false;
