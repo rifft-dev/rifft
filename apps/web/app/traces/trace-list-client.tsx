@@ -44,12 +44,6 @@ const getPriorityScore = (trace: TraceSummary) => {
   return base + fatalFailures * 10 + trace.mast_failures.length * 4 + trace.agent_count;
 };
 
-const TRACE_TONE_CARD: Record<"critical" | "warning" | "healthy", string> = {
-  critical: "border-l-2 border-l-destructive bg-card hover:bg-muted/30",
-  warning: "border-l-2 border-l-amber-500 bg-card hover:bg-muted/30",
-  healthy: "border-l-2 border-l-chart-1 bg-card hover:bg-muted/30",
-};
-
 const TRACE_TONE_SIGNAL: Record<"critical" | "warning" | "healthy", string> = {
   critical: "text-destructive",
   warning: "text-amber-700 dark:text-amber-300",
@@ -65,7 +59,7 @@ const getTraceTone = (trace: TraceSummary) => {
         ? "warning"
         : "healthy";
   const { label, labelClass } = getTraceToneLabels(trace);
-  return { card: TRACE_TONE_CARD[tier], label, labelClass, signalClass: TRACE_TONE_SIGNAL[tier] };
+  return { tier, label, labelClass, signalClass: TRACE_TONE_SIGNAL[tier] };
 };
 
 export function TraceListClient({
@@ -125,7 +119,7 @@ export function TraceListClient({
 
   if (total === 0) {
     return (
-      <Card className="section-fade rounded-xl border shadow-sm">
+      <Card className="section-fade tc-panel border shadow-sm">
         <CardContent className="flex flex-col items-center gap-4 py-16 text-center">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted">
             <Search className="h-6 w-6 text-muted-foreground" />
@@ -152,10 +146,10 @@ export function TraceListClient({
   return (
     <TooltipProvider>
       <div className="space-y-6">
-      <Card className="section-fade overflow-hidden rounded-xl border bg-card shadow-sm">
+      <Card className="section-fade tc-filter-card overflow-hidden border">
         <CardHeader className="gap-5">
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_180px_auto]">
-            <Command className="rounded-xl border border-input bg-background/80">
+            <Command className="border border-input bg-background/80">
               <CommandInput
                 placeholder="Search trace IDs, frameworks, or failure modes..."
                 value={query}
@@ -190,7 +184,7 @@ export function TraceListClient({
           </div>
 
           {initialMode && query === getMastMeta(initialMode).label ? (
-            <div className="flex items-center justify-between gap-4 rounded-2xl border border-chart-1/25 bg-chart-1/5 px-4 py-3 text-sm">
+            <div className="flex items-center justify-between gap-4 border border-chart-1/25 bg-chart-1/5 px-4 py-3 text-sm">
               <span className="text-muted-foreground">
                 Showing traces with failure mode{" "}
                 <span className="font-medium text-foreground">
@@ -208,7 +202,7 @@ export function TraceListClient({
           ) : null}
 
           {firstIncident ? (
-            <div className="grid gap-3 rounded-lg border border-l-2 border-l-destructive bg-muted/20 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
+            <div className="tc-callout grid gap-3 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
               <div className="space-y-2">
                 <div className="font-display flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-destructive">
                   <AlertTriangle className="h-3.5 w-3.5" />
@@ -243,7 +237,7 @@ export function TraceListClient({
       </Card>
 
       {showMastHint ? (
-        <div className="stagger-1 section-fade flex items-start justify-between gap-4 rounded-2xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+        <div className="stagger-1 section-fade flex items-start justify-between gap-4 border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
           <div className="flex items-start gap-3">
             <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
             <span>
@@ -266,7 +260,7 @@ export function TraceListClient({
 
       <div className="stagger-1 section-fade grid gap-4">
         {filtered.length === 0 ? (
-          <Card className="surface-lift rounded-xl shadow-sm">
+          <Card className="surface-lift tc-panel shadow-sm">
             <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
               <Search className="h-8 w-8 text-muted-foreground" />
               <div className="font-display text-lg font-medium uppercase tracking-[0.06em]">No traces match the current filters</div>
@@ -280,11 +274,12 @@ export function TraceListClient({
             const href = `/traces/${trace.trace_id}`;
             const failing = trace.status === "error" || trace.mast_failures.length > 0;
             const tone = getTraceTone(trace);
+            const isTopIncident = firstIncident?.trace_id === trace.trace_id;
 
             return (
               <Card
                 key={trace.trace_id}
-                className={`surface-lift cursor-pointer rounded-xl border shadow-sm transition-colors ${tone.card}`}
+                className={`trace-card surface-lift cursor-pointer transition-colors ${tone.tier} ${isTopIncident ? "top" : ""}`}
                 role="link"
                 tabIndex={0}
                 onClick={() => router.push(href)}
@@ -302,7 +297,7 @@ export function TraceListClient({
                         {trace.status}
                       </Badge>
                       <span
-                        className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.12em] ${tone.labelClass}`}
+                        className={`inline-flex items-center border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.12em] ${tone.labelClass}`}
                       >
                         {!failing ? <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> : null}
                         {tone.label}
@@ -325,7 +320,7 @@ export function TraceListClient({
                   </div>
 
                   <div className="space-y-3">
-                    <div className={`text-xs font-medium uppercase tracking-[0.12em] ${tone.signalClass}`}>
+                    <div className={`text-xs font-medium uppercase tracking-[0.12em] tc-tone-${tone.tier}`}>
                       Failure signals
                     </div>
                     {trace.mast_failures.length > 0 ? (
@@ -354,7 +349,7 @@ export function TraceListClient({
                   </div>
 
                   <div className="flex justify-start lg:justify-end">
-                    <div className="font-display inline-flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.1em] text-chart-1">
+                    <div className="tc-open inline-flex items-center gap-2">
                       Open
                       <ArrowRight className="h-3.5 w-3.5" />
                     </div>

@@ -16,6 +16,7 @@ import { InteractiveTraceDetail } from "./interactive-trace-detail";
 import { SetBaselineButton } from "./set-baseline-button";
 import { SaveToDatasetButton } from "./save-to-dataset-button";
 import { PartialFailureBanner } from "@/components/partial-failure-banner";
+import { formatCurrency, formatDuration } from "@/lib/utils";
 
 const fallbackAgentDetail = (
   trace: Awaited<ReturnType<typeof getTraceSnapshot>>["trace"],
@@ -127,22 +128,56 @@ export default async function TraceDetailPage({
   const hasIncidentContext = trace.mast_failures.length > 0 || trace.status === "error";
 
     return (
-      <div className="space-y-6 px-0 py-0">
-        <section className="border-b bg-card px-6 py-6 lg:px-8">
+      <div className="traces-console">
+        <div className="traces-console-frame">
+          <div className="tc-classbar">
+            <span>RIFFT // OPERATOR CONSOLE // INCIDENT REVIEW // UNCLASSIFIED</span>
+          </div>
+          <div className="tc-tickbar">
+            <div className="tc-ticks">
+              <span>
+                <span className={`tc-dot ${trace.status === "error" ? "fail" : ""}`} />
+                <span className="tc-key">RUN</span>{" "}
+                <span className={trace.status === "error" ? "tc-val fail" : "tc-val"}>
+                  {trace.status === "error" ? "FAILED" : trace.status.toUpperCase()}
+                </span>
+              </span>
+              <span><span className="tc-key">TRACE</span> <span className="tc-val">{trace.trace_id}</span></span>
+              <span><span className="tc-key">FRAMEWORK</span> <span className="tc-val">{trace.framework[0] ?? "UNKNOWN"}</span></span>
+            </div>
+            <div className="tc-ticks">
+              <span><span className="tc-key">SPANS</span> <span className="tc-val">{trace.span_count}</span></span>
+              <span><span className="tc-key">FAILURES</span> <span className={trace.mast_failures.length > 0 ? "tc-val fail" : "tc-val"}>{trace.mast_failures.length}</span></span>
+            </div>
+          </div>
+          <div className="tc-section-head">
+            <div className="lhs">
+              <span className="num">TRACE</span>
+              <span className="sep">/</span>
+              <span className="title">Incident review</span>
+            </div>
+            <div className="rhs">
+              {hasIncidentContext ? "CAUSAL ATTRIBUTION COMPLETE" : "TRACE SNAPSHOT"} · {trace.mast_failures.filter((failure) => failure.severity === "fatal").length} FATAL FAILURE
+            </div>
+          </div>
+
+        <section className="tc-trace-header">
           <Button asChild variant="ghost" size="sm" className="mb-4 -ml-3">
             <Link href="/traces">
               <ArrowLeft />
-              Back
+              Back to incident queue
             </Link>
           </Button>
-          <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+          <div className="tc-header-grid">
             <div className="space-y-4">
               <div className="space-y-2">
-                <h1 className="font-display text-3xl font-medium lg:text-4xl">
+                <h1 className="text-4xl leading-none lg:text-5xl">
                   {trace.root_span_name ?? trace.trace_id}
                 </h1>
                 {trace.root_span_name ? (
-                  <p className="font-mono text-xs text-muted-foreground">{trace.trace_id}</p>
+                  <p className="font-mono text-xs text-muted-foreground">
+                    {trace.trace_id} · ingested {new Date(trace.started_at).toISOString()} · {trace.agent_count} agents · {trace.span_count} spans
+                  </p>
                 ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
@@ -150,6 +185,11 @@ export default async function TraceDetailPage({
                   {trace.status}
                 </Badge>
                 <Badge variant="outline">{trace.agent_count} agents</Badge>
+                {trace.framework.map((item) => (
+                  <Badge key={item} variant="outline">{item}</Badge>
+                ))}
+                <Badge variant="outline">{formatCurrency(trace.total_cost_usd)}</Badge>
+                <Badge variant="outline">{formatDuration(trace.duration_ms)} wall</Badge>
                 {isCurrentBaseline ? <Badge variant="secondary">Reference run</Badge> : null}
               </div>
               <div className="flex flex-wrap gap-3">
@@ -167,20 +207,21 @@ export default async function TraceDetailPage({
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
               {hasIncidentContext ? (
                 <>
-                  <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
-                    <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-destructive">
+                  <div className="tc-attr-card root">
+                    <div className="tc-attr-label">
                       <AlertTriangle className="h-3.5 w-3.5" />
                       Root cause
                     </div>
-                    <div className="mt-2 font-mono text-sm">{rootCauseAgent}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">{primaryFailure}</div>
+                    <div className="tc-attr-value">{rootCauseAgent}</div>
+                    <div className="tc-attr-sub">{primaryFailure} · fatal</div>
                   </div>
-                  <div className="rounded-2xl border bg-muted/30 p-4">
-                    <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
+                  <div className="tc-attr-card">
+                    <div className="tc-attr-label">
                       <GitBranch className="h-3.5 w-3.5" />
                       Failing agent
                     </div>
-                    <div className="mt-2 font-mono text-sm">{failingAgent}</div>
+                    <div className="tc-attr-value">{failingAgent}</div>
+                    <div className="tc-attr-sub">Surfaced downstream of root cause</div>
                   </div>
                 </>
               ) : null}
@@ -188,7 +229,7 @@ export default async function TraceDetailPage({
           </div>
           <PartialFailureBanner failedParts={failedParts} />
           {comparisonData ? (
-            <div className="mt-6 flex flex-col gap-3 rounded-2xl border bg-muted/20 p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
+            <div className="mt-6 flex flex-col gap-3 border bg-muted/20 p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge
                   variant={
@@ -238,6 +279,7 @@ export default async function TraceDetailPage({
           trace={trace}
           replayHookConfigured={!!process.env.RIFFT_REPLAY_HOOK_URL}
         />
+        </div>
       </div>
     );
   } catch (error) {

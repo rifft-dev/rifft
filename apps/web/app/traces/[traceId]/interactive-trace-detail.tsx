@@ -865,7 +865,7 @@ export function InteractiveTraceDetail({
 
   return (
     <>
-      <div className="space-y-6 px-6 py-6">
+      <div className="tc-body space-y-6">
         <FailureExplanationCard
           traceId={trace.trace_id}
           canRegenerate={canRegenerateFailureExplanation}
@@ -879,7 +879,7 @@ export function InteractiveTraceDetail({
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_380px]">
           <div className="space-y-6">
             {liveState.isLive || liveState.sessionExpired ? (
-            <Card className="section-fade rounded-2xl border border-chart-1/25 bg-[radial-gradient(circle_at_left,hsl(var(--chart-1))/0.1,transparent_40%),hsl(var(--card))]">
+            <Card className="section-fade tc-panel border border-chart-1/25">
               <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
@@ -903,7 +903,7 @@ export function InteractiveTraceDetail({
             ) : null}
 
             <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "graph" | "timeline")} className="section-fade space-y-4">
-              <div className="flex flex-col gap-4 rounded-3xl border bg-card/70 p-4 shadow-sm backdrop-blur-sm lg:flex-row lg:items-center lg:justify-between">
+              <div className="tc-panel tc-panel-bar flex flex-col gap-4 border p-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="space-y-2">
                   <TabsList>
                     <TabsTrigger value="graph" className="font-display text-[11px] font-medium uppercase tracking-[0.08em]">Conversation path</TabsTrigger>
@@ -918,7 +918,7 @@ export function InteractiveTraceDetail({
               </div>
 
               <TabsContent value="graph" className="mt-0">
-                <Card className="overflow-hidden rounded-3xl border-border/70 bg-card/85 p-0 shadow-sm backdrop-blur-sm">
+                <Card className="tc-panel overflow-hidden p-0">
                   {trace.mast_failures.length > 0 ? (
                     <div className="flex items-center justify-end border-b px-6 py-3">
                       <Badge variant="destructive">{trace.mast_failures.length} failure(s) detected</Badge>
@@ -935,7 +935,7 @@ export function InteractiveTraceDetail({
 
                     {/* Graph legend — top-right corner */}
                     {graph.edges.length > 0 ? (
-                      <div className="pointer-events-none absolute right-4 top-4 z-10 flex flex-col gap-1.5 rounded-2xl border bg-background/90 px-3 py-2.5 text-xs text-muted-foreground shadow backdrop-blur">
+                      <div className="pointer-events-none absolute right-4 top-4 z-10 flex flex-col gap-1.5 border bg-background/90 px-3 py-2.5 text-xs text-muted-foreground shadow backdrop-blur">
                         <div className="flex items-center gap-2">
                           <span className="inline-block h-3 w-3 shrink-0 rounded-sm border-2 border-destructive" />
                           Root cause agent
@@ -955,7 +955,7 @@ export function InteractiveTraceDetail({
                     ) : null}
                     {graph.edges.length === 0 ? (
                       <div className="flex h-full flex-col items-center justify-center gap-4 px-8 text-center">
-                        <div className="rounded-2xl border border-dashed bg-muted/20 p-8">
+                        <div className="border border-dashed bg-muted/20 p-8">
                           <GitBranch className="mx-auto h-8 w-8 text-muted-foreground/40" />
                           <div className="mt-4 text-sm font-medium">No inter-agent communication captured</div>
                           <p className="mt-2 max-w-sm text-sm text-muted-foreground">
@@ -997,7 +997,7 @@ export function InteractiveTraceDetail({
                       </ReactFlowProvider>
                     )}
                     {graph.edges.length > 0 ? (
-                    <div className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-2xl border bg-background/90 p-2 shadow-lg backdrop-blur">
+                    <div className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 border bg-background/90 p-2 shadow-lg backdrop-blur">
                       {replayMode ? (
                         <>
                           <span className="px-2 text-xs text-muted-foreground hidden sm:inline">
@@ -1031,7 +1031,7 @@ export function InteractiveTraceDetail({
               </TabsContent>
 
               <TabsContent value="timeline" className="mt-0">
-                <Card className="timeline-tab-height rounded-3xl border-border/70 bg-card/85 backdrop-blur-sm">
+                <Card className="timeline-tab-height tc-panel backdrop-blur-sm">
                   <CardHeader>
                     <div className="flex items-center justify-between gap-4">
                       <div>
@@ -1103,7 +1103,7 @@ export function InteractiveTraceDetail({
                                 key={span.span_id}
                                 type="button"
                                 onClick={() => openMessageOverlay(span.span_id, span.target_agent_id)}
-                                className={`w-full rounded-lg border px-3 py-2 text-left transition-colors hover:bg-muted/40 ${
+                                className={`w-full border px-3 py-2 text-left transition-colors hover:bg-muted/40 ${
                                   isRelated ? "border-chart-1/50 bg-chart-1/8" : ""
                                 }`}
                               >
@@ -1133,7 +1133,7 @@ export function InteractiveTraceDetail({
             {/* Handoff inspector — only show when a message is selected or the trace has failures */}
             {(selectedMessage ?? (trace.mast_failures.length > 0 ? focusMessage : null)) ? (
             <>
-            <Card className="rounded-3xl border-border/50 shadow-sm">
+            <Card className="tc-inspector-card shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="font-display flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
                   <GitBranch className="h-3.5 w-3.5" />
@@ -1148,19 +1148,19 @@ export function InteractiveTraceDetail({
                       <Badge variant={statusVariant(focusMessage.status)}>{focusMessage.status}</Badge>
                       <Badge variant="outline">{focusMessage.duration_ms}ms</Badge>
                     </div>
-                    <div className="rounded-2xl border bg-muted/20 p-4">
+                    <div className="border bg-muted/20 p-4">
                       <div className="text-sm font-medium">
                         {focusMessage.source_agent_id} {"→"} {focusMessage.target_agent_id}
                       </div>
                     </div>
-                    <div className="rounded-2xl border bg-muted/20 p-4">
+                    <div className="border bg-muted/20 p-4">
                       <div className="mb-2 text-sm font-medium">What this agent passed on</div>
                       <pre className="max-h-56 overflow-auto whitespace-pre-wrap text-xs font-mono text-muted-foreground">
                         {formatJsonPreview(focusMessage.message)}
                       </pre>
                     </div>
                     {focusDraft ? (
-                      <div className="rounded-2xl border bg-muted/20 p-4">
+                      <div className="border bg-muted/20 p-4">
                         <div className="mb-2 text-sm font-medium">Saved replay payload</div>
                         <pre className="max-h-40 overflow-auto whitespace-pre-wrap text-xs font-mono text-muted-foreground">
                           {formatJsonPreview(focusDraft.payload)}
@@ -1185,7 +1185,7 @@ export function InteractiveTraceDetail({
 
             {/* "What changed here" — only render when there are actual hints */}
             {focusPayloadHints.length > 0 ? (
-            <Card className="rounded-3xl border-border/50 shadow-sm">
+            <Card className="tc-inspector-card shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="font-display flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
                   <CircleAlert className="h-3.5 w-3.5" />
@@ -1194,7 +1194,7 @@ export function InteractiveTraceDetail({
               </CardHeader>
               <CardContent className="space-y-3">
                 {focusPayloadHints.map((hint) => (
-                  <div key={hint} className="rounded-2xl border p-4 text-sm text-muted-foreground">
+                  <div key={hint} className="border p-4 text-sm text-muted-foreground">
                     {hint}
                   </div>
                 ))}
@@ -1204,7 +1204,7 @@ export function InteractiveTraceDetail({
 
             {/* "What happened next" — only render when there are actual failures on this path */}
             {selectedPathFailures.length > 0 ? (
-            <Card className="rounded-3xl border-border/50 shadow-sm">
+            <Card className="tc-inspector-card shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="font-display flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
                   <ShieldAlert className="h-3.5 w-3.5" />
@@ -1213,7 +1213,7 @@ export function InteractiveTraceDetail({
               </CardHeader>
               <CardContent className="space-y-3">
                 {selectedPathFailures.map((failure) => (
-                  <div key={`${failure.mode}-${failure.agent_id ?? "trace"}`} className="rounded-2xl border p-4">
+                  <div key={`${failure.mode}-${failure.agent_id ?? "trace"}`} className="border p-4">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium">{getMastMeta(failure.mode).label}</span>
                       <Badge variant={failure.severity === "fatal" ? "destructive" : "outline"}>

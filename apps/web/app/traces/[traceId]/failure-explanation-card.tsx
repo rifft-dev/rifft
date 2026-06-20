@@ -289,7 +289,7 @@ const CopyButton = ({ value, label = "Copy" }: { value: string; label?: string }
 );
 
 const FixExamples = ({ fixKit }: { fixKit: ReturnType<typeof getFixKit> }) => (
-  <details className="rounded-2xl border bg-background/60 p-4">
+  <details className="border bg-background/60 p-4">
     <summary className="cursor-pointer text-sm font-medium">Apply this in your app</summary>
     <p className="mt-2 text-sm text-muted-foreground">
       Use these as starting points for the guardrail, prompt, or code change that makes this replay pass in production.
@@ -320,7 +320,7 @@ const FixExamples = ({ fixKit }: { fixKit: ReturnType<typeof getFixKit> }) => (
           </div>
           <CopyButton value={fixKit.codeSnippet} />
         </div>
-        <pre className="mt-2 overflow-auto whitespace-pre-wrap rounded-xl bg-muted/40 p-3 text-xs text-muted-foreground">
+        <pre className="mt-2 overflow-auto whitespace-pre-wrap bg-muted/40 p-3 text-xs text-muted-foreground">
           {fixKit.codeSnippet}
         </pre>
       </div>
@@ -443,8 +443,7 @@ export function FailureExplanationCard({
   }
 
   return (
-    <Card className="overflow-hidden rounded-3xl border-chart-1/30 shadow-sm">
-      <div className="h-0.5 w-full bg-gradient-to-r from-chart-1 via-chart-1/60 to-transparent" />
+    <Card className="tc-fx-card overflow-hidden shadow-sm">
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="font-display flex items-center gap-2 text-lg font-medium uppercase tracking-[0.08em]">
@@ -455,27 +454,27 @@ export function FailureExplanationCard({
       </CardHeader>
       <CardContent className="space-y-4">
         {state.kind === "loading" ? (
-          <div className="flex items-center gap-3 rounded-2xl border bg-background/60 px-4 py-4 text-sm text-muted-foreground">
+          <div className="flex items-center gap-3 border bg-background/60 px-4 py-4 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
             Generating a trace-specific explanation from the failure evidence…
           </div>
         ) : null}
 
         {state.kind === "error" ? (
-          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-4 text-sm text-muted-foreground">
+          <div className="border border-amber-500/30 bg-amber-500/10 px-4 py-4 text-sm text-muted-foreground">
             {state.message}
           </div>
         ) : null}
 
         {state.kind === "fallback" ? (
           <>
-            <div className="rounded-2xl border bg-background/60 p-4">
+            <div className="border bg-background/60 p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                   Start here
                 </div>
                 {primaryFailure ? (
-                  <span className="rounded-md bg-muted px-2 py-0.5 font-mono text-xs text-muted-foreground">
+                  <span className="bg-muted px-2 py-0.5 font-mono text-xs text-muted-foreground">
                     {getMastMeta(primaryFailure.mode).label}
                     {primaryFailure.agent_id ? ` · ${primaryFailure.agent_id}` : ""}
                   </span>
@@ -485,13 +484,13 @@ export function FailureExplanationCard({
                 {getMastMeta(primaryFailure?.mode ?? "").explanation}
               </p>
             </div>
-            <div className="rounded-2xl border bg-background/60 p-4">
+            <div className="border bg-background/60 p-4">
               <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                 What to change
               </div>
               <p className="mt-2 text-sm text-muted-foreground">{fixKit.validationRule}</p>
             </div>
-            <div className="rounded-2xl border bg-background/60 p-4">
+            <div className="border bg-background/60 p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                   How to verify
@@ -500,7 +499,7 @@ export function FailureExplanationCard({
               </div>
               <p className="mt-2 text-sm text-muted-foreground">{fixKit.verification}</p>
             </div>
-            <details className="rounded-2xl border bg-background/60 p-4">
+            <details className="border bg-background/60 p-4">
               <summary className="cursor-pointer text-sm font-medium">Show path</summary>
               <div className="mt-3 font-mono text-sm text-muted-foreground">
                 {causalChain && causalChain.length > 0
@@ -519,19 +518,19 @@ export function FailureExplanationCard({
 
         {state.kind === "ready" ? (
           <>
-            <div className="rounded-2xl border bg-background/60 p-4">
+            <div className="border bg-background/60 p-4">
               <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                 Start here
               </div>
               <p className="mt-2 text-sm text-muted-foreground">{state.explanation.summary}</p>
             </div>
-            <div className="rounded-2xl border bg-background/60 p-4">
+            <div className="border bg-background/60 p-4">
               <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                 What to change
               </div>
               <p className="mt-2 text-sm text-muted-foreground">{state.explanation.recommended_fix}</p>
             </div>
-            <div className="rounded-2xl border bg-background/60 p-4">
+            <div className="border bg-background/60 p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                   How to verify
@@ -541,7 +540,7 @@ export function FailureExplanationCard({
               <p className="mt-2 text-sm text-muted-foreground">{fixKit.verification}</p>
             </div>
 
-            <details className="rounded-2xl border bg-background/60 p-4">
+            <details className="border bg-background/60 p-4">
               <summary className="cursor-pointer text-sm font-medium">Show evidence</summary>
               <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
                 {state.explanation.evidence.map((item) => (
@@ -553,7 +552,7 @@ export function FailureExplanationCard({
               {state.explanation.key_stats && state.explanation.key_stats.length > 0 ? (
                 <div className="mt-4 flex flex-wrap gap-2">
                   {state.explanation.key_stats.map((stat) => (
-                    <div key={stat.label} className="rounded-xl border bg-muted/30 px-3 py-2 text-xs">
+                    <div key={stat.label} className="border bg-muted/30 px-3 py-2 text-xs">
                       <span className="text-muted-foreground">{stat.label}: </span>
                       <span className="font-mono">{stat.value}</span>
                     </div>
