@@ -2,7 +2,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, ArrowLeft, ArrowRight, GitBranch } from "lucide-react";
 import {
-  getAgentDetail,
   getProjectSettings,
   getForkDrafts,
   getProjectBaseline,
@@ -37,7 +36,17 @@ const fallbackAgentDetail = (
       total_cost_usd: totalCostUsd,
       total_duration_ms: totalDurationMs,
     },
-    messages: [],
+    messages: trace.communication_spans
+      .filter((span) => span.source_agent_id === agentId || span.target_agent_id === agentId)
+      .map((span) => ({
+        span_id: span.span_id,
+        name: span.name,
+        sender: span.source_agent_id,
+        receiver: span.target_agent_id,
+        timestamp: span.start_time,
+        payload: span.message,
+        protocol: span.protocol,
+      })),
     tool_calls: [],
     mast_failures: trace.mast_failures.filter((failure) => failure.agent_id === agentId),
     decision_context: {
@@ -64,13 +73,14 @@ export default async function TraceDetailPage({
   }
 
   try {
-    const snapshot = await getTraceSnapshot(traceId);
-    const ancillaryResults = await Promise.allSettled([
+    const snapshotPromise = getTraceSnapshot(traceId);
+    const ancillaryResultsPromise = Promise.allSettled([
       getTraceComparison(traceId),
       getForkDrafts(traceId),
       getProjectBaseline(),
       getProjectSettings(),
     ]);
+    const [snapshot, ancillaryResults] = await Promise.all([snapshotPromise, ancillaryResultsPromise]);
     const { trace, graph, timeline } = snapshot;
     const [comparisonResult, forkDraftsResult, baselineResult, projectSettingsResult] = ancillaryResults;
     const comparisonResponse =
@@ -97,24 +107,10 @@ export default async function TraceDetailPage({
       projectSettingsResult.status === "rejected" ? "workspace settings" : null,
     ].filter((part): part is string => part !== null);
 
-    // Fetch agent details in batches to avoid overwhelming the API when a
-    // trace has many agents. Each batch of 5 runs in parallel.
-    const AGENT_BATCH_SIZE = 5;
-    const agentDetails = (
-      await Promise.all(
-        Array.from({ length: Math.ceil(graph.nodes.length / AGENT_BATCH_SIZE) }, (_, i) =>
-          Promise.all(
-            graph.nodes.slice(i * AGENT_BATCH_SIZE, (i + 1) * AGENT_BATCH_SIZE).map(async (node) => {
-              try {
-                return { agentId: node.id, detail: await getAgentDetail(traceId, node.id) };
-              } catch {
-                return { agentId: node.id, detail: fallbackAgentDetail(trace, graph, node.id) };
-              }
-            }),
-          ),
-        ),
-      )
-    ).flat();
+    const agentDetails = graph.nodes.map((node) => ({
+      agentId: node.id,
+      detail: fallbackAgentDetail(trace, graph, node.id),
+    }));
     const rootCauseAgent = trace.causal_attribution.root_cause_agent_id ?? "Not inferred";
     const failingAgent = trace.causal_attribution.failing_agent_id ?? "Not inferred";
     const primaryFailureMode = trace.mast_failures[0]?.mode;

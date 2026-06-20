@@ -198,7 +198,7 @@ export function AppSidebar({ mobile = false, onNavigate }: AppSidebarProps) {
     return () => {
       cancelled = true;
     };
-  }, [accessToken, pathname]);
+  }, [accessToken]);
 
   if (!user) {
     return null;

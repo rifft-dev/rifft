@@ -1,4 +1,4 @@
-import type { EvalDataset, ForkDraft, TraceBaseline, TraceSummary } from "./api-types";
+import type { AgentDetail, EvalDataset, ForkDraft, TraceBaseline, TraceSummary } from "./api-types";
 
 type ReplayResult = {
   runId: string;
@@ -95,6 +95,11 @@ export const getCloudTraces = (options?: {
     `/api/cloud/traces${suffix}`,
   );
 };
+
+export const getAgentDetail = (traceId: string, agentId: string) =>
+  fetchBrowserJson<AgentDetail>(
+    `/api/traces/${encodeURIComponent(traceId)}/agents/${encodeURIComponent(agentId)}`,
+  );
 
 export const createCloudWorkspace = (name: string) =>
   fetchBrowserJson<{ project: { id: string; name: string } }>(`/api/cloud/projects`, {

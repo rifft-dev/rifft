@@ -48,7 +48,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { replayFromSpan, saveForkDraft as persistForkDraft } from "../../lib/client-api";
+import { getAgentDetail, replayFromSpan, saveForkDraft as persistForkDraft } from "../../lib/client-api";
 import { formatCurrency } from "@/lib/utils";
 import type { AgentDetail, AgentFailureDiffResult, ForkDraft, TraceDetail, TraceGraph, TraceLiveSnapshot, TraceTimeline } from "../../lib/api-types";
 import { FailureExplanationCard } from "./failure-explanation-card";
@@ -218,7 +218,17 @@ const buildFallbackAgentDetail = (
       total_cost_usd: totalCostUsd,
       total_duration_ms: totalDurationMs,
     },
-    messages: [],
+    messages: trace.communication_spans
+      .filter((span) => span.source_agent_id === agentId || span.target_agent_id === agentId)
+      .map((span) => ({
+        span_id: span.span_id,
+        name: span.name,
+        sender: span.source_agent_id,
+        receiver: span.target_agent_id,
+        timestamp: span.start_time,
+        payload: span.message,
+        protocol: span.protocol,
+      })),
     tool_calls: [],
     mast_failures: trace.mast_failures.filter((failure) => failure.agent_id === agentId),
     decision_context: {
@@ -226,6 +236,16 @@ const buildFallbackAgentDetail = (
       reason: "agent_detail_unavailable",
     },
   };
+};
+
+const isFallbackAgentDetail = (detail: AgentDetail | null | undefined) => {
+  const context = detail?.decision_context;
+  return (
+    typeof context === "object" &&
+    context !== null &&
+    !Array.isArray(context) &&
+    (context as { reason?: unknown }).reason === "agent_detail_unavailable"
+  );
 };
 
 const statusVariant = (status: string) => {
@@ -414,15 +434,20 @@ export function InteractiveTraceDetail({
   });
   const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
   const [agentDiffByAgent, setAgentDiffByAgent] = useState<Map<string, AgentFailureDiffResult>>(new Map());
+  const [loadingAgentIds, setLoadingAgentIds] = useState<Set<string>>(() => new Set());
+  const [failedAgentIds, setFailedAgentIds] = useState<Set<string>>(() => new Set());
   const overlayOpenedFromSheet = useRef(false);
   const overlaySourceAgentId = useRef<string | null>(null);
   const previousFailureCountRef = useRef(initialTrace.mast_failures.length);
+  const requestedAgentDetailsRef = useRef<Set<string>>(new Set());
 
   const agentById = useMemo(() => new Map(agentRecords.map((item) => [item.agentId, item.detail])), [agentRecords]);
   const replaySpans = [...trace.communication_spans].sort(
     (left, right) => new Date(left.start_time).getTime() - new Date(right.start_time).getTime(),
   );
   const selectedAgent = selectedAgentId ? agentById.get(selectedAgentId) ?? null : null;
+  const selectedAgentLoading = selectedAgentId ? loadingAgentIds.has(selectedAgentId) : false;
+  const selectedAgentLoadFailed = selectedAgentId ? failedAgentIds.has(selectedAgentId) : false;
   const selectedMessage = selectedSpanId
     ? trace.communication_spans.find((span) => span.span_id === selectedSpanId) ?? null
     : null;
@@ -433,6 +458,58 @@ export function InteractiveTraceDetail({
   const focusDraft = focusMessage
     ? forkDrafts.find((draft) => draft.span_id === focusMessage.span_id) ?? null
     : null;
+
+  useEffect(() => {
+    if (!sheetOpen || !selectedAgentId || requestedAgentDetailsRef.current.has(selectedAgentId)) {
+      return;
+    }
+
+    const currentDetail = agentById.get(selectedAgentId);
+    if (!isFallbackAgentDetail(currentDetail)) {
+      requestedAgentDetailsRef.current.add(selectedAgentId);
+      return;
+    }
+
+    let cancelled = false;
+    requestedAgentDetailsRef.current.add(selectedAgentId);
+    setLoadingAgentIds((current) => new Set(current).add(selectedAgentId));
+    setFailedAgentIds((current) => {
+      const next = new Set(current);
+      next.delete(selectedAgentId);
+      return next;
+    });
+
+    getAgentDetail(trace.trace_id, selectedAgentId)
+      .then((detail) => {
+        if (cancelled) {
+          return;
+        }
+        setAgentRecords((records) =>
+          records.map((record) =>
+            record.agentId === selectedAgentId ? { agentId: selectedAgentId, detail } : record,
+          ),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFailedAgentIds((current) => new Set(current).add(selectedAgentId));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingAgentIds((current) => {
+            const next = new Set(current);
+            next.delete(selectedAgentId);
+            return next;
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [agentById, selectedAgentId, sheetOpen, trace.trace_id]);
+
   const parsedForkPayload = useMemo(() => {
     if (!forkPayload.trim()) {
       return { valid: false as const, error: "JSON payload is required." };
@@ -1259,6 +1336,15 @@ export function InteractiveTraceDetail({
                   <Badge variant={selectedAgent.mast_failures.some((f) => f.severity === "fatal") ? "destructive" : "outline"}>
                     {selectedAgent.mast_failures.length} failure{selectedAgent.mast_failures.length === 1 ? "" : "s"}
                   </Badge>
+                ) : null}
+                {selectedAgentLoading ? (
+                  <Badge variant="outline" className="gap-1.5">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Loading detail
+                  </Badge>
+                ) : null}
+                {selectedAgentLoadFailed ? (
+                  <Badge variant="outline">Detail unavailable</Badge>
                 ) : null}
               </div>
               <Tabs

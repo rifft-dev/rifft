@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, ArrowRight, CheckCircle2, Info, Loader2, Search, Sparkles, X } from "lucide-react";
@@ -116,6 +116,12 @@ export function TraceListClient({
   const canLoadMore = traces.length < total;
 
   const firstIncident = filtered.find((trace) => trace.status === "error" || trace.mast_failures.length > 0) ?? null;
+
+  useEffect(() => {
+    filtered.slice(0, 10).forEach((trace) => {
+      router.prefetch(`/traces/${trace.trace_id}`);
+    });
+  }, [filtered, router]);
 
   if (total === 0) {
     return (
