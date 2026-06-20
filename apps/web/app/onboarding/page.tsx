@@ -42,10 +42,6 @@ export default async function OnboardingPage() {
     );
   }
 
-  if (traces.traces[0]?.trace_id) {
-    redirect(`/traces/${traces.traces[0].trace_id}`);
-  }
-
   return (
     <FirstTraceOnboarding
       project={project}

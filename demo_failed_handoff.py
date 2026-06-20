@@ -22,7 +22,7 @@ import rifft
 # Copy these from rifft.dev → Settings → API key
 PROJECT_ID = "cloud-fe0764f8-08b39a11"
 API_KEY    = "rft_live_bc6067db0723b629b02079de743b509b0bec"
-ENDPOINT   = "https://collector.rifft.dev"
+ENDPOINT   = "https://ingest.rifft.dev"
 # ─────────────────────────────────────────────────────────────────────────────
 
 rifft.init(
