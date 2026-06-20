@@ -37,7 +37,7 @@ type PackageManagerOption = "npm" | "pnpm" | "yarn";
 
 const TABS: { id: TabOption; label: string }[] = [
   { id: "crewai",  label: "CrewAI"  },
-  { id: "autogen", label: "AutoGen" },
+  { id: "autogen", label: "AG2" },
   { id: "python",  label: "Python"  },
   { id: "node",    label: "Node.js" },
   { id: "mcp",     label: "MCP"     },

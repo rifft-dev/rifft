@@ -136,6 +136,7 @@ export type TraceBaseline = {
   updated_at: string;
   trace_started_at: string | null;
   trace_status: "ok" | "error" | "unset" | null;
+  trace_root_span_name: string | null;
 };
 
 export type TraceComparison = {
@@ -400,6 +401,9 @@ export type EvalDataset = {
   created_at: string;
   updated_at: string;
   entry_count: number;
+  pass_count: number;
+  fail_count: number;
+  unlabelled_count: number;
 };
 
 export type EvalDatasetEntry = {

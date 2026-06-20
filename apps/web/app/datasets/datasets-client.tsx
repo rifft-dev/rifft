@@ -3,7 +3,8 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Database, Plus, Trash2 } from "lucide-react";
+import { CheckCircle2, Database, Plus, Trash2, XCircle } from "lucide-react";
+import { toast } from "sonner";
 import type { EvalDataset } from "../lib/api-types";
 import { createEvalDataset, deleteEvalDataset } from "../lib/client-api";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +27,7 @@ export function DatasetsClient({ datasets: initial }: { datasets: EvalDataset[] 
   const router = useRouter();
   const [datasets, setDatasets] = useState(initial);
   const [createOpen, setCreateOpen] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [creating, startCreate] = useTransition();
@@ -48,20 +50,22 @@ export function DatasetsClient({ datasets: initial }: { datasets: EvalDataset[] 
         setDescription("");
         router.refresh();
       } catch {
-        // ignore — user sees no change
+        toast.error("Could not create dataset.");
       }
     });
   };
 
-  const handleDelete = (datasetId: string) => {
+  const handleDeleteConfirm = (datasetId: string) => {
     if (!projectId) return;
     startDelete(async () => {
       try {
         await deleteEvalDataset(projectId, datasetId);
         setDatasets((prev) => prev.filter((d) => d.id !== datasetId));
+        setDeleteConfirmId(null);
         router.refresh();
       } catch {
-        // ignore
+        toast.error("Could not delete dataset.");
+        setDeleteConfirmId(null);
       }
     });
   };
@@ -133,48 +137,105 @@ export function DatasetsClient({ datasets: initial }: { datasets: EvalDataset[] 
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {datasets.map((dataset) => (
-            <Card key={dataset.id} className="group rounded-3xl border-border/60 shadow-sm hover:border-border transition-colors">
-              <CardHeader className="pb-2">
-                <div className="flex items-start justify-between gap-2">
-                  <CardTitle className="font-display text-base font-medium leading-snug">
-                    <Link
-                      href={`/datasets/${dataset.id}`}
-                      className="hover:underline underline-offset-4"
-                    >
-                      {dataset.name}
-                    </Link>
-                  </CardTitle>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-                    onClick={() => handleDelete(dataset.id)}
-                    disabled={deleting}
-                    aria-label={`Delete ${dataset.name}`}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
+          {datasets.map((dataset) => {
+            const hasLabels = dataset.pass_count + dataset.fail_count > 0;
+            const passRate = hasLabels
+              ? dataset.pass_count / (dataset.pass_count + dataset.fail_count)
+              : null;
+            const isConfirmingDelete = deleteConfirmId === dataset.id;
+
+            return (
+              <Card key={dataset.id} className="group rounded-3xl border-border/60 shadow-sm hover:border-border transition-colors">
+                <CardHeader className="pb-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <CardTitle className="font-display text-base font-medium leading-snug">
+                      <Link
+                        href={`/datasets/${dataset.id}`}
+                        className="hover:underline underline-offset-4"
+                      >
+                        {dataset.name}
+                      </Link>
+                    </CardTitle>
+                    {isConfirmingDelete ? (
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => handleDeleteConfirm(dataset.id)}
+                          disabled={deleting}
+                        >
+                          Delete
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => setDeleteConfirmId(null)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                        onClick={() => setDeleteConfirmId(dataset.id)}
+                        disabled={deleting}
+                        aria-label={`Delete ${dataset.name}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {dataset.description ? (
+                    <p className="text-sm text-muted-foreground line-clamp-2">{dataset.description}</p>
+                  ) : null}
+                  <div className="flex flex-wrap gap-1.5">
+                    <Badge variant="outline">
+                      {dataset.entry_count} trace{dataset.entry_count === 1 ? "" : "s"}
+                    </Badge>
+                    {dataset.pass_count > 0 ? (
+                      <Badge variant="secondary" className="gap-1">
+                        <CheckCircle2 className="h-3 w-3 text-chart-1" />
+                        {dataset.pass_count} pass
+                      </Badge>
+                    ) : null}
+                    {dataset.fail_count > 0 ? (
+                      <Badge variant="destructive" className="gap-1">
+                        <XCircle className="h-3 w-3" />
+                        {dataset.fail_count} fail
+                      </Badge>
+                    ) : null}
+                    {dataset.unlabelled_count > 0 ? (
+                      <Badge variant="outline" className="text-muted-foreground">
+                        {dataset.unlabelled_count} unlabelled
+                      </Badge>
+                    ) : null}
+                  </div>
+                  {hasLabels && passRate !== null ? (
+                    <div className="space-y-1">
+                      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-chart-1 transition-all"
+                          style={{ width: `${Math.round(passRate * 100)}%` }}
+                        />
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {Math.round(passRate * 100)}% pass rate
+                      </div>
+                    </div>
+                  ) : null}
+                  <Button asChild variant="outline" size="sm" className="w-full">
+                    <Link href={`/datasets/${dataset.id}`}>Open</Link>
                   </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {dataset.description ? (
-                  <p className="text-sm text-muted-foreground line-clamp-2">{dataset.description}</p>
-                ) : null}
-                <div className="flex flex-wrap gap-1.5">
-                  <Badge variant="outline">
-                    {dataset.entry_count} trace{dataset.entry_count === 1 ? "" : "s"}
-                  </Badge>
-                  <Badge variant="secondary" className="text-xs">
-                    {new Date(dataset.created_at).toLocaleDateString()}
-                  </Badge>
-                </div>
-                <Button asChild variant="outline" size="sm" className="w-full">
-                  <Link href={`/datasets/${dataset.id}`}>Open</Link>
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>

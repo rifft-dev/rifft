@@ -251,8 +251,11 @@ export default async function WorkspacePage() {
                     Current reference run
                   </div>
                   <div className="text-sm font-medium">
-  {baseline.trace_id}
-</div>
+                    {baseline.trace_root_span_name ?? `${baseline.trace_id.slice(0, 12)}…`}
+                  </div>
+                  {baseline.trace_root_span_name ? (
+                    <div className="font-mono text-xs text-muted-foreground">{baseline.trace_id.slice(0, 8)}…</div>
+                  ) : null}
                   <div className="flex flex-wrap gap-2">
                     <Badge variant={baseline.trace_status === "error" ? "destructive" : "secondary"}>
                       {baseline.trace_status ?? "unknown"}

@@ -146,6 +146,7 @@ type TraceBaselineRecord = {
   updated_at: string;
   trace_started_at: string | null;
   trace_status: "ok" | "error" | "unset" | null;
+  trace_root_span_name: string | null;
 };
 
 export type ProjectAlertChannel = "slack" | "email";
@@ -2531,7 +2532,8 @@ export const getProjectBaseline = async (projectId: string): Promise<TraceBaseli
         tb.label,
         tb.updated_at,
         t.started_at AS trace_started_at,
-        t.status AS trace_status
+        t.status AS trace_status,
+        t.root_span_name AS trace_root_span_name
       FROM trace_baselines tb
       JOIN traces t ON t.trace_id = tb.trace_id
       WHERE tb.project_id = $1
@@ -2556,6 +2558,7 @@ export const getProjectBaseline = async (projectId: string): Promise<TraceBaseli
         : ((row.trace_started_at as string | null) ?? null),
     trace_status:
       row.trace_status === "error" ? "error" : row.trace_status === "ok" ? "ok" : row.trace_status === "unset" ? "unset" : null,
+    trace_root_span_name: typeof row.trace_root_span_name === "string" ? row.trace_root_span_name : null,
   };
 };
 
@@ -2603,7 +2606,8 @@ export const getTraceComparison = async (
           label: null,
           updated_at: "",
           trace_started_at: null,
-          trace_status: null,
+          trace_status: null as TraceBaselineRecord["trace_status"],
+          trace_root_span_name: null,
         }
       : await getProjectBaseline(currentTrace.project_id);
 
@@ -2668,6 +2672,7 @@ export const getTraceComparison = async (
           : baselineTrace.status === "ok"
             ? "ok"
             : "unset",
+      trace_root_span_name: baselineRecord.trace_root_span_name ?? null,
     },
     current_trace_id: currentTrace.trace_id,
     verdict,
@@ -2950,6 +2955,9 @@ export type EvalDatasetRow = {
   created_at: string;
   updated_at: string;
   entry_count: number;
+  pass_count: number;
+  fail_count: number;
+  unlabelled_count: number;
 };
 
 export type EvalDatasetEntryRow = {
@@ -2975,7 +2983,10 @@ export const listEvalDatasets = async (projectId: string): Promise<EvalDatasetRo
     `
       SELECT
         d.id, d.project_id, d.name, d.description, d.created_at, d.updated_at,
-        COUNT(e.id)::int AS entry_count
+        COUNT(e.id)::int AS entry_count,
+        COUNT(CASE WHEN e.label = 'pass' THEN 1 END)::int AS pass_count,
+        COUNT(CASE WHEN e.label = 'fail' THEN 1 END)::int AS fail_count,
+        COUNT(CASE WHEN e.label IS NULL AND e.id IS NOT NULL THEN 1 END)::int AS unlabelled_count
       FROM eval_datasets d
       LEFT JOIN eval_dataset_entries e ON e.dataset_id = d.id
       WHERE d.project_id = $1
@@ -2992,6 +3003,9 @@ export const listEvalDatasets = async (projectId: string): Promise<EvalDatasetRo
     created_at: r.created_at instanceof Date ? r.created_at.toISOString() : (r.created_at as string),
     updated_at: r.updated_at instanceof Date ? r.updated_at.toISOString() : (r.updated_at as string),
     entry_count: r.entry_count as number,
+    pass_count: (r.pass_count as number) ?? 0,
+    fail_count: (r.fail_count as number) ?? 0,
+    unlabelled_count: (r.unlabelled_count as number) ?? 0,
   }));
 };
 
@@ -3018,6 +3032,9 @@ export const createEvalDataset = async (
     created_at: r.created_at instanceof Date ? r.created_at.toISOString() : (r.created_at as string),
     updated_at: r.updated_at instanceof Date ? r.updated_at.toISOString() : (r.updated_at as string),
     entry_count: 0,
+    pass_count: 0,
+    fail_count: 0,
+    unlabelled_count: 0,
   };
 };
 
@@ -3038,7 +3055,10 @@ export const getEvalDatasetWithEntries = async (
   const datasetResult = await pgPool.query(
     `
       SELECT d.id, d.project_id, d.name, d.description, d.created_at, d.updated_at,
-             COUNT(e.id)::int AS entry_count
+             COUNT(e.id)::int AS entry_count,
+             COUNT(CASE WHEN e.label = 'pass' THEN 1 END)::int AS pass_count,
+             COUNT(CASE WHEN e.label = 'fail' THEN 1 END)::int AS fail_count,
+             COUNT(CASE WHEN e.label IS NULL AND e.id IS NOT NULL THEN 1 END)::int AS unlabelled_count
       FROM eval_datasets d
       LEFT JOIN eval_dataset_entries e ON e.dataset_id = d.id
       WHERE d.id = $1 AND d.project_id = $2
@@ -3057,6 +3077,9 @@ export const getEvalDatasetWithEntries = async (
     created_at: dr.created_at instanceof Date ? dr.created_at.toISOString() : (dr.created_at as string),
     updated_at: dr.updated_at instanceof Date ? dr.updated_at.toISOString() : (dr.updated_at as string),
     entry_count: dr.entry_count as number,
+    pass_count: (dr.pass_count as number) ?? 0,
+    fail_count: (dr.fail_count as number) ?? 0,
+    unlabelled_count: (dr.unlabelled_count as number) ?? 0,
   };
 
   const entriesResult = await pgPool.query(

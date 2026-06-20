@@ -30,6 +30,22 @@ export function ApiKeyCard({
 
   return (
     <div className="space-y-3">
+      <div className="flex gap-2 items-center rounded-xl border bg-muted/30 px-3 py-2 text-sm">
+        <span className="text-muted-foreground shrink-0">Project ID</span>
+        <span className="font-mono text-xs flex-1 truncate">{projectId}</span>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 shrink-0 px-2"
+          onClick={() => {
+            void navigator.clipboard.writeText(projectId);
+            toast.success("Project ID copied");
+          }}
+        >
+          <Copy className="h-3.5 w-3.5" />
+          Copy
+        </Button>
+      </div>
       <div className="flex gap-2">
         <Input
           type={revealed ? "text" : "password"}
