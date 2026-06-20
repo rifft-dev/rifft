@@ -94,7 +94,7 @@
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
   --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-mono: var(--font-jetbrains);
 }
 
 * {
@@ -116,7 +116,7 @@ body {
 code,
 pre,
 .font-mono {
-  font-family: var(--font-geist-mono);
+  font-family: var(--font-jetbrains), ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .font-display {

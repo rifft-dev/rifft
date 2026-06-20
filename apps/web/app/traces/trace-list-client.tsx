@@ -45,9 +45,9 @@ const getPriorityScore = (trace: TraceSummary) => {
 };
 
 const TRACE_TONE_CARD: Record<"critical" | "warning" | "healthy", string> = {
-  critical: "border-destructive/30 bg-[radial-gradient(circle_at_top_left,hsl(var(--destructive))/0.12,transparent_30%),hsl(var(--card))] hover:bg-[radial-gradient(circle_at_top_left,hsl(var(--destructive))/0.16,transparent_34%),hsl(var(--card))]",
-  warning: "border-amber-500/30 bg-[radial-gradient(circle_at_top_left,hsl(var(--chart-4))/0.12,transparent_30%),hsl(var(--card))] hover:bg-[radial-gradient(circle_at_top_left,hsl(var(--chart-4))/0.16,transparent_34%),hsl(var(--card))]",
-  healthy: "border-emerald-500/25 bg-[radial-gradient(circle_at_top_left,hsl(var(--chart-2))/0.12,transparent_30%),hsl(var(--card))] hover:bg-[radial-gradient(circle_at_top_left,hsl(var(--chart-2))/0.16,transparent_34%),hsl(var(--card))]",
+  critical: "border-l-2 border-l-destructive bg-card hover:bg-muted/30",
+  warning: "border-l-2 border-l-amber-500 bg-card hover:bg-muted/30",
+  healthy: "border-l-2 border-l-chart-1 bg-card hover:bg-muted/30",
 };
 
 const TRACE_TONE_SIGNAL: Record<"critical" | "warning" | "healthy", string> = {
@@ -125,7 +125,7 @@ export function TraceListClient({
 
   if (total === 0) {
     return (
-      <Card className="section-fade rounded-[2rem] border shadow-sm">
+      <Card className="section-fade rounded-xl border shadow-sm">
         <CardContent className="flex flex-col items-center gap-4 py-16 text-center">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted">
             <Search className="h-6 w-6 text-muted-foreground" />
@@ -152,7 +152,7 @@ export function TraceListClient({
   return (
     <TooltipProvider>
       <div className="space-y-6">
-      <Card className="section-fade overflow-hidden rounded-[2rem] border bg-[radial-gradient(circle_at_top_left,hsl(var(--destructive))/0.12,transparent_24%),radial-gradient(circle_at_bottom_right,hsl(var(--chart-1))/0.12,transparent_28%),hsl(var(--card))] shadow-sm">
+      <Card className="section-fade overflow-hidden rounded-xl border bg-card shadow-sm">
         <CardHeader className="gap-5">
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_180px_auto]">
             <Command className="rounded-xl border border-input bg-background/80">
@@ -208,7 +208,7 @@ export function TraceListClient({
           ) : null}
 
           {firstIncident ? (
-            <div className="grid gap-3 rounded-2xl border border-destructive/20 bg-[radial-gradient(circle_at_top_left,hsl(var(--destructive))/0.1,transparent_28%),hsl(var(--background))/0.84] p-4 lg:grid-cols-[1fr_auto] lg:items-center">
+            <div className="grid gap-3 rounded-lg border border-l-2 border-l-destructive bg-muted/20 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
               <div className="space-y-2">
                 <div className="font-display flex items-center gap-2 text-xs font-medium uppercase tracking-[0.1em] text-destructive">
                   <AlertTriangle className="h-3.5 w-3.5" />
@@ -266,7 +266,7 @@ export function TraceListClient({
 
       <div className="stagger-1 section-fade grid gap-4">
         {filtered.length === 0 ? (
-          <Card className="surface-lift rounded-3xl shadow-sm">
+          <Card className="surface-lift rounded-xl shadow-sm">
             <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
               <Search className="h-8 w-8 text-muted-foreground" />
               <div className="font-display text-lg font-medium uppercase tracking-[0.06em]">No traces match the current filters</div>
@@ -284,9 +284,7 @@ export function TraceListClient({
             return (
               <Card
                 key={trace.trace_id}
-                className={`surface-lift cursor-pointer rounded-3xl border shadow-sm transition-colors ${tone.card} ${
-                  index === 0 && failing ? "ring-1 ring-destructive/20" : ""
-                }`}
+                className={`surface-lift cursor-pointer rounded-xl border shadow-sm transition-colors ${tone.card}`}
                 role="link"
                 tabIndex={0}
                 onClick={() => router.push(href)}

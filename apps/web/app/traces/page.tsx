@@ -17,15 +17,28 @@ export default async function TracesPage({ searchParams }: TracesPageProps) {
 
   return (
     <div className="space-y-6 px-6 py-8 lg:px-8">
-      <section className="rounded-[2rem] border bg-[radial-gradient(circle_at_top_left,hsl(var(--destructive))/0.1,transparent_26%),radial-gradient(circle_at_top_right,hsl(var(--chart-1))/0.12,transparent_30%),hsl(var(--card))] p-8 shadow-sm">
-        <Badge variant="outline" className="font-display text-[10px] uppercase tracking-[0.12em]">Incident queue</Badge>
-        <h1 className="font-display mt-4 text-4xl font-medium">Open the run that matters first</h1>
-        <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
-          Failure badges use the{" "}
-          <span className="font-medium text-foreground">UC Berkeley MAST taxonomy</span>
-          {" "}— hover any badge to see what the failure mode means and how to fix it.
-        </p>
-        <div className="mt-4 flex flex-wrap gap-2">
+      <section className="space-y-4 border-b pb-6">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-baseline gap-2">
+            <span className="font-mono text-xs uppercase tracking-[0.15em] text-muted-foreground">Traces</span>
+            <span className="text-muted-foreground">/</span>
+            <span className="font-display text-sm font-medium uppercase tracking-[0.08em]">Incident queue</span>
+          </div>
+          <span className="hidden font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground sm:block">
+            Sorted by priority · Root-cause first
+          </span>
+        </div>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h1 className="font-display text-3xl font-medium lg:text-4xl">Open the run that matters first</h1>
+            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+              Failure badges use the{" "}
+              <span className="font-medium text-foreground">UC Berkeley MAST taxonomy</span>
+              {" "}— hover any badge to see what the failure mode means and how to fix it.
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
           <Badge variant={failingCount > 0 ? "destructive" : "secondary"}>
             {failingCount} needing attention
           </Badge>
