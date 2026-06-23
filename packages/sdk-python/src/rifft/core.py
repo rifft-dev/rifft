@@ -10,6 +10,7 @@ from pathlib import Path
 import sys
 import threading
 import ssl
+import urllib.error
 import urllib.request
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
@@ -83,8 +84,12 @@ class _JsonTraceExporter(SpanExporter):
             with urllib.request.urlopen(request, context=ssl_ctx) as response:
                 if 200 <= response.status < 300:
                     return SpanExportResult.SUCCESS
+        except urllib.error.HTTPError as error:
+            body = error.read().decode("utf-8", errors="replace")
+            print(f"rifft exporter failed: {error} — url={request.full_url} body={body!r}", file=sys.stderr)
+            return SpanExportResult.FAILURE
         except Exception as error:
-            print(f"rifft exporter failed: {error}", file=sys.stderr)
+            print(f"rifft exporter failed: {error} — url={request.full_url}", file=sys.stderr)
             return SpanExportResult.FAILURE
 
         return SpanExportResult.FAILURE
