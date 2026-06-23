@@ -76,11 +76,42 @@ Supported env vars:
 - `RIFFT_API_KEY`
 - `RIFFT_SERVICE_NAME`
 
+## Claude Code Integration
+
+Automatically trace every Claude Code session — every tool call, timing, and error — without changing your workflow.
+
+```bash
+pip install rifft-sdk
+rifft-claude init --project-id YOUR_PROJECT_ID --api-key YOUR_API_KEY
+```
+
+`rifft-claude init` registers hooks in `~/.claude/settings.json`. From then on, every Claude Code session sends a trace to Rifft when it ends: one root `claude-code.session` span with a child span per tool call (Bash, Read, Edit, Write, Task, and so on).
+
+**What you'll see in Rifft:**
+- Full tool call sequence with timing
+- Errors surfaced automatically (failed Bash commands, missing files)
+- MAST classification applied to the session (tool loops, hallucinated tool calls)
+- Traces appear the moment a session ends — no code changes needed
+
+Check your setup:
+
+```bash
+rifft-claude status
+```
+
+Credentials are stored in `~/.rifft/config.json` (chmod 600). You can also use env vars:
+
+```bash
+export RIFFT_PROJECT_ID=your_project_id
+export RIFFT_API_KEY=rft_live_xxxxxxxxxxxx
+```
+
 ## What You Get
 
 - trace capture for Python multi-agent workflows
 - agent and tool spans with timing and cost metadata
 - communication edges and handoff visibility
+- Claude Code session tracing with zero code changes
 - compatibility with Rifft adapters such as CrewAI, AutoGen, and MCP
 
 ## Links

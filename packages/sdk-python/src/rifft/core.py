@@ -304,7 +304,11 @@ def _auto_instrument_frameworks() -> tuple[str, ...]:
     instrumented: list[str] = []
     for framework_name in ("crewai", "autogen", "mcp"):
         module_name = f"rifft.adapters.{framework_name}"
-        if importlib.util.find_spec(module_name) is None:
+        try:
+            spec = importlib.util.find_spec(module_name)
+        except (ModuleNotFoundError, ValueError):
+            continue
+        if spec is None:
             continue
 
         try:
