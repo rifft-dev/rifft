@@ -185,8 +185,8 @@ export default async function HomePage({
 
               <div className="hp-hero-stats">
                 <div className="hp-hero-stat">
-                  <span className="hp-stat-num">120ms</span>
-                  <span className="hp-stat-lbl">avg. time to<br /><b>root cause</b></span>
+                  <span className="hp-stat-num">15</span>
+                  <span className="hp-stat-lbl">MAST failure<br /><b>modes classified</b></span>
                 </div>
                 <div className="hp-hero-stat" style={{ paddingLeft: 16 }}>
                   <span className="hp-stat-num">2.8s</span>
@@ -439,7 +439,7 @@ export default async function HomePage({
         <div className="hp-footer-bottom">
           <span>© 2026 Rifft Inc.</span>
           <span style={{ fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.12em", color: "var(--fg-4)" }}>
-            UNCLASSIFIED // FOR OPERATOR USE
+RIFFT // FOR OPERATOR USE
           </span>
           <a href="https://x.com/rifftdev" target="_blank" rel="noopener noreferrer" style={{ color: "var(--fg-3)" }}>X/TWITTER</a>
         </div>

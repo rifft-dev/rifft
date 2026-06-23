@@ -1,0 +1,2 @@
+[console_scripts]
+rifft-claude = rifft.claude_code:main

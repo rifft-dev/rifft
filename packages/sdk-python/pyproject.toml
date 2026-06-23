@@ -29,6 +29,9 @@ Homepage = "https://github.com/rifft-dev/rifft"
 Repository = "https://github.com/rifft-dev/rifft"
 Issues = "https://github.com/rifft-dev/rifft/issues"
 
+[project.scripts]
+rifft-claude = "rifft.claude_code:main"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 packages = ["rifft"]

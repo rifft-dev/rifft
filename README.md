@@ -1,13 +1,15 @@
 # Rifft
 
-Rifft — cross-framework debugger for multi-agent AI systems.
+Rifft finds the handoff that broke your multi-agent run — not just the error message. It walks backwards through spans to the root cause, classifies the failure with the UC Berkeley MAST taxonomy, and shows you the exact agent and message where things went wrong.
 
 [![npm version](https://img.shields.io/npm/v/%40rifft-dev%2Frifft)](https://www.npmjs.com/package/@rifft-dev/rifft)
 [![PyPI version](https://img.shields.io/pypi/v/rifft-sdk)](https://pypi.org/project/rifft-sdk/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/rifft-dev/rifft/blob/main/LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/rifft-dev/rifft?style=social)](https://github.com/rifft-dev/rifft)
 
-Rifft helps developers debug multi-agent AI systems by making agent decisions, message flow, tool calls, and failure cascades visible across frameworks. It is intentionally opinionated: Rifft is for debugging multi-agent behavior, not for generic LLM observability.
+![Rifft communication graph showing 3 agents and MAST failure classification](docs/assets/readme-communication-graph.png)
+
+## Install
 
 JavaScript SDK:
 
@@ -24,20 +26,33 @@ pip install rifft-sdk
 Python adapters:
 
 - CrewAI: [`rifft-crewai`](https://pypi.org/project/rifft-crewai/)
-- AutoGen: [`rifft-autogen`](https://pypi.org/project/rifft-autogen/)
+- AutoGen / AG2: [`rifft-autogen`](https://pypi.org/project/rifft-autogen/)
 - MCP: [`rifft-mcp`](https://pypi.org/project/rifft-mcp/)
 
-## Screenshot
+**Claude Code** — trace every session with zero code changes:
 
-![Rifft communication graph showing 3 agents and MAST failure classification](docs/assets/readme-communication-graph.png)
+```bash
+rifft-claude init --project-id YOUR_PROJECT_ID --api-key YOUR_API_KEY
+```
+
+## Why not Langfuse or LangSmith?
+
+Langfuse and LangSmith are excellent general-purpose LLM observability platforms. Rifft is different in one specific way: it is built for multi-agent failure analysis, not span collection.
+
+- **Root cause, not span trees.** When a 4-agent run fails, Langfuse shows you a tree of 200 spans. Rifft shows you which agent caused the failure and why, in plain English.
+- **MAST classification.** Every failure is automatically classified against the UC Berkeley MAST taxonomy — 15 standardised failure modes covering tool call hallucinations, dropped handoffs, and context overflows. You get a label, an explanation, and a suggested fix.
+- **Agent graph, not a waterfall.** Rifft renders the agent communication graph so you can see which agent sent what to which, where messages were dropped, and which handoff edge was the bad one.
+- **Not for single-LLM tracing.** If you're tracing individual LLM calls in a monolithic app, use Langfuse or Helicone. Rifft is opinionated: it is for multi-agent systems where the failure could be anywhere in the chain.
 
 ## What Rifft does
 
-- Cross-framework trace ingestion for multi-agent runs
-- Agent-to-agent graph visualization
+- Cross-framework trace ingestion over OTLP
+- Agent-to-agent communication graph
+- MAST failure classification with fix suggestions
+- Causal attribution — root cause agent, failing agent
 - Timeline and per-agent debugging views
-- MAST failure classification
-- Self-hosted deployment with Docker Compose
+- Dataset and eval workflow for regression testing
+- Self-hosted (Docker Compose) and cloud (rifft.dev)
 
 ## What Rifft does not do
 
@@ -45,7 +60,7 @@ Python adapters:
 - LLM evaluation or scoring
 - AI gateway or proxy features
 - General APM or application monitoring
-- Single-LLM call tracing as the primary feature
+- Single-LLM call tracing as the primary use case
 
 ## Framework support
 
@@ -54,12 +69,13 @@ Python adapters:
 | CrewAI | Full |
 | AutoGen / AG2 | Full |
 | MCP | Full |
-| LangGraph | Planned |
+| Claude Code | Full (via `rifft-claude`) |
 | Custom agents via SDK | Full |
+| LangGraph | Planned |
 
 ## 5-minute CrewAI quickstart
 
-```python
+```bash
 pip install rifft-sdk rifft-crewai
 ```
 
@@ -119,25 +135,9 @@ rifft/
 └── docs/
 ```
 
-## Developer notes
-
-- Current implementation tracker: [docs/implementation-tracker.md](/Users/ned/Documents/GitHub/Rifft/docs/implementation-tracker.md)
-- Current Phase 0/1 plan: [docs/phase-0-1-plan.md](/Users/ned/Documents/GitHub/Rifft/docs/phase-0-1-plan.md)
-- Exceptional product roadmap: [docs/exceptional-roadmap.md](/Users/ned/Documents/GitHub/Rifft/docs/exceptional-roadmap.md)
-- Use [scripts/cleanup-demo-traces.sh](/Users/ned/Documents/GitHub/Rifft/scripts/cleanup-demo-traces.sh) to remove stale pre-fix demo traces from local storage.
-
 ## Community
 
-- Ask questions, share broken multi-agent traces, and follow updates in [GitHub Discussions](https://github.com/rifft-dev/rifft/discussions).
-
-## Docs
-
-- Architecture notes: [docs/architecture.md](/Users/ned/Documents/GitHub/Rifft/docs/architecture.md)
-- Cloud MVP spec: [docs/cloud-mvp.md](/Users/ned/Documents/GitHub/Rifft/docs/cloud-mvp.md)
-- Deployment checklist: [docs/deployment-checklist.md](/Users/ned/Documents/GitHub/Rifft/docs/deployment-checklist.md)
-- Docs/wiki placeholder: [GitHub Wiki](https://github.com/rifft-dev/rifft/wiki)
-- Contributing: [CONTRIBUTING.md](/Users/ned/Documents/GitHub/Rifft/CONTRIBUTING.md)
-- Marketing landing page: [apps/web/app/page.tsx](/Users/ned/Documents/GitHub/Rifft/apps/web/app/page.tsx)
+Ask questions, share broken multi-agent traces, and follow updates in [GitHub Discussions](https://github.com/rifft-dev/rifft/discussions).
 
 ## License
 

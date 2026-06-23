@@ -25,7 +25,7 @@ export function HomepageTickbar({ show }: { show: boolean }) {
     <>
       <div className="hp-classbar">
         <span className="hp-stripe" />
-        <span>RIFFT // OPERATOR CONSOLE // V0.42.1 // UNCLASSIFIED</span>
+        <span>RIFFT // OPERATOR CONSOLE // V0.42.1</span>
       </div>
       {show && (
         <div className="hp-tickbar">
@@ -49,7 +49,7 @@ const TRACE_STEPS = [
   { id: "t1",     label: "TRACE",     state: "passed", title: "Planner → Retriever",           meta: "0.4s",  badge: null, desc: null, metric: null },
   { id: "t2",     label: "TRACE",     state: "passed", title: "Retriever → Researcher",        meta: "1.1s",  badge: null, desc: null, metric: null },
   { id: "fail",   label: "FAILURE",   state: "fail",   title: "Researcher → Publisher",        meta: null,    badge: { kind: "fail", text: "UNVERIFIED" }, desc: "Hallucinated citation in draft — caught before downstream call.", metric: null },
-  { id: "diag",   label: "DIAGNOSED", state: "warn",   title: "Root cause traced to Researcher", meta: null,  badge: null, desc: null, metric: { num: "120ms", lbl: "to classify & pinpoint", tone: "amber" } },
+  { id: "diag",   label: "DIAGNOSED", state: "warn",   title: "Root cause traced to Researcher", meta: null,  badge: null, desc: null, metric: { num: "MAST", lbl: "failure classified", tone: "amber" } },
   { id: "fork",   label: "FORKED",    state: "ok",     title: "Forked at Researcher",          meta: null,    badge: { kind: "ok", text: "+ VALIDATION" }, desc: "Resume from the exact broken handoff.", metric: null },
   { id: "replay", label: "REPLAYED",  state: "ok",     title: "Researcher → Publisher · ok",   meta: null,    badge: null, desc: null, metric: { num: "2.8s", lbl: "end-to-end replay", tone: "green" } },
 ];

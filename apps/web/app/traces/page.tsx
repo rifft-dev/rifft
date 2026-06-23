@@ -22,7 +22,7 @@ export default async function TracesPage({ searchParams }: TracesPageProps) {
     <div className="traces-console">
       <div className="traces-console-frame">
         <div className="tc-classbar">
-          <span>RIFFT // OPERATOR CONSOLE // INCIDENT QUEUE // UNCLASSIFIED</span>
+          <span>RIFFT // OPERATOR CONSOLE // INCIDENT QUEUE</span>
         </div>
         <div className="tc-tickbar">
           <div className="tc-ticks">

@@ -127,7 +127,7 @@ export default async function TraceDetailPage({
       <div className="traces-console">
         <div className="traces-console-frame">
           <div className="tc-classbar">
-            <span>RIFFT // OPERATOR CONSOLE // INCIDENT REVIEW // UNCLASSIFIED</span>
+            <span>RIFFT // OPERATOR CONSOLE // INCIDENT REVIEW</span>
           </div>
           <div className="tc-tickbar">
             <div className="tc-ticks">
