@@ -16,6 +16,7 @@ Classifier: Programming Language :: Python :: 3.12
 Requires-Python: >=3.9
 Description-Content-Type: text/markdown
 Requires-Dist: opentelemetry-sdk>=1.30.0
+Requires-Dist: certifi>=2024.0.0
 
 # rifft-sdk
 

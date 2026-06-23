@@ -1,1 +1,2 @@
 opentelemetry-sdk>=1.30.0
+certifi>=2024.0.0

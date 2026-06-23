@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import sys
 import threading
+import ssl
 import urllib.request
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
@@ -69,8 +70,17 @@ class _JsonTraceExporter(SpanExporter):
             headers=headers,
             method="POST",
         )
+        # Build an SSL context that uses certifi's CA bundle when available,
+        # falling back to the system default. This prevents certificate errors
+        # on macOS where Python doesn't use the system keychain by default.
         try:
-            with urllib.request.urlopen(request) as response:
+            import certifi
+            ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+        except ImportError:
+            ssl_ctx = ssl.create_default_context()
+
+        try:
+            with urllib.request.urlopen(request, context=ssl_ctx) as response:
                 if 200 <= response.status < 300:
                     return SpanExportResult.SUCCESS
         except Exception as error:
