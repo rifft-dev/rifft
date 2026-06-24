@@ -364,7 +364,7 @@ export default async function HomePage({
             </div>
           ))}
           <div style={{ padding: "12px 28px", fontFamily: "var(--mono)", fontSize: 10.5, color: "var(--fg-3)", letterSpacing: "0.06em", borderTop: "1px solid var(--line)" }}>
-            Comparison reflects public product information as of June 2026. If we missed something, <a href="mailto:hey@rifft.dev" style={{ color: "var(--accent)" }}>tell us →</a>
+            Comparison reflects public product information as of June 2026. If we missed something, <a href="mailto:hello@rifft.dev" style={{ color: "var(--accent)" }}>tell us →</a>
           </div>
         </section>
 
