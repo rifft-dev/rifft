@@ -25,6 +25,7 @@ pip install rifft-sdk
 
 Python adapters:
 
+- LangGraph: [`rifft-langgraph`](https://pypi.org/project/rifft-langgraph/)
 - CrewAI: [`rifft-crewai`](https://pypi.org/project/rifft-crewai/)
 - AutoGen / AG2: [`rifft-autogen`](https://pypi.org/project/rifft-autogen/)
 - MCP: [`rifft-mcp`](https://pypi.org/project/rifft-mcp/)
@@ -71,7 +72,7 @@ Langfuse and LangSmith are excellent general-purpose LLM observability platforms
 | MCP | Full |
 | Claude Code | Full (via `rifft-claude`) |
 | Custom agents via SDK | Full |
-| LangGraph | Planned |
+| LangGraph | Full |
 
 ## 5-minute CrewAI quickstart
 
@@ -128,6 +129,7 @@ rifft/
 │   ├── adapters/
 │   │   ├── autogen
 │   │   ├── crewai
+│   │   ├── langgraph
 │   │   └── mcp
 │   ├── collector
 │   ├── sdk-js

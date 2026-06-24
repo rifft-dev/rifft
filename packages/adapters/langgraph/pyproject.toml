@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rifft-langgraph"
+version = "0.1.0"
+description = "LangGraph adapter for Rifft"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["rifft-sdk"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = { find = { where = ["src"], namespaces = true } }
