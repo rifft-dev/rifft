@@ -2,12 +2,12 @@
 
 Rifft finds the handoff that broke your multi-agent run — not just the error message. It walks backwards through spans to the root cause, classifies the failure with the UC Berkeley MAST taxonomy, and shows you the exact agent and message where things went wrong.
 
+![Rifft showing root cause classification across a 4-agent pipeline](docs/assets/rifft-readme.png)
+
 [![npm version](https://img.shields.io/npm/v/%40rifft-dev%2Frifft)](https://www.npmjs.com/package/@rifft-dev/rifft)
 [![PyPI version](https://img.shields.io/pypi/v/rifft-sdk)](https://pypi.org/project/rifft-sdk/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/rifft-dev/rifft/blob/main/LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/rifft-dev/rifft?style=social)](https://github.com/rifft-dev/rifft)
-
-![Rifft communication graph showing 3 agents and MAST failure classification](docs/assets/readme-communication-graph.png)
 
 ## Install
 

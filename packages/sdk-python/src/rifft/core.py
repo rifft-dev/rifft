@@ -61,6 +61,7 @@ class _JsonTraceExporter(SpanExporter):
         body = json.dumps(envelope).encode("utf-8")
         headers = {
             "content-type": "application/json",
+            "user-agent": "rifft-sdk-python/0.1.1",
         }
         if self._api_key:
             headers["authorization"] = f"Bearer {self._api_key}"

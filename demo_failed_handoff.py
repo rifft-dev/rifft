@@ -139,8 +139,31 @@ def orchestrator(task: str) -> None:
         )
 
         try:
+            # Handoff 1: orchestrator → researcher
+            with rifft.span("handoff.to_researcher", agent_id="orchestrator") as h1:
+                h1.set_attribute("source_agent_id", "orchestrator")
+                h1.set_attribute("target_agent_id", "researcher")
+                h1.set_attribute("message", task)
+                h1.set_attribute("protocol", "function_call")
+
             research = researcher_agent(task)
+
+            # Handoff 2: researcher → validator
+            with rifft.span("handoff.to_validator", agent_id="researcher") as h2:
+                h2.set_attribute("source_agent_id", "researcher")
+                h2.set_attribute("target_agent_id", "validator")
+                h2.set_attribute("message", str(research))
+                h2.set_attribute("protocol", "function_call")
+
             validated = validator_agent(research)
+
+            # Handoff 3: validator → writer (passes the malformed payload through)
+            with rifft.span("handoff.to_writer", agent_id="validator") as h3:
+                h3.set_attribute("source_agent_id", "validator")
+                h3.set_attribute("target_agent_id", "writer")
+                h3.set_attribute("message", str(validated))
+                h3.set_attribute("protocol", "function_call")
+
             result = writer_agent(validated)
             span.set_attribute("output.result", result)
             span.set_eval_label("pass")
