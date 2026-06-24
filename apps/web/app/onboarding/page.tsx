@@ -11,7 +11,9 @@ import { Button } from "@/components/ui/button";
 export default async function OnboardingPage() {
   await requireCloudProject("/onboarding");
   const [project, traces] = await Promise.all([getProjectSettings(), getTraces()]);
-  const ingestUrl = process.env.NEXT_PUBLIC_INGEST_URL ?? "https://ingest.rifft.dev";
+  // Use INGEST_URL (server-only) so Railway's internal NEXT_PUBLIC_INGEST_URL
+  // (collector.railway.internal) never leaks into the snippet shown to users.
+  const ingestUrl = process.env.INGEST_URL ?? process.env.NEXT_PUBLIC_INGEST_URL ?? "https://ingest.rifft.dev";
   const planIntent = (await cookies()).get(planIntentCookieName)?.value ?? null;
   const onboardingStartedAt = new Date().toISOString();
 

@@ -423,6 +423,7 @@ export default async function HomePage({
               <li><a href="https://docs.rifft.dev/api" target="_blank" rel="noopener noreferrer">API reference</a></li>
               <li><a href="https://docs.rifft.dev/mast" target="_blank" rel="noopener noreferrer">MAST taxonomy</a></li>
               <li><a href="https://docs.rifft.dev/examples" target="_blank" rel="noopener noreferrer">Sample traces</a></li>
+              <li><a href="https://discord.gg/pXkqnAZsDt" target="_blank" rel="noopener noreferrer">Discord community</a></li>
             </ul>
           </div>
           <div className="hp-footer-col">
@@ -441,6 +442,7 @@ export default async function HomePage({
           <span style={{ fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.12em", color: "var(--fg-4)" }}>
 RIFFT // FOR OPERATOR USE
           </span>
+          <a href="https://discord.gg/pXkqnAZsDt" target="_blank" rel="noopener noreferrer" style={{ color: "var(--fg-3)" }}>DISCORD</a>
           <a href="https://x.com/rifftdev" target="_blank" rel="noopener noreferrer" style={{ color: "var(--fg-3)" }}>X/TWITTER</a>
         </div>
       </div>

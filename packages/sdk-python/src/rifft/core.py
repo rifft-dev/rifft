@@ -318,7 +318,7 @@ def _detect_service_name() -> str:
 
 def _auto_instrument_frameworks() -> tuple[str, ...]:
     instrumented: list[str] = []
-    for framework_name in ("crewai", "autogen", "mcp"):
+    for framework_name in ("langgraph", "crewai", "autogen", "mcp"):
         module_name = f"rifft.adapters.{framework_name}"
         try:
             spec = importlib.util.find_spec(module_name)

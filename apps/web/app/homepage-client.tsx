@@ -229,7 +229,7 @@ const FRAMEWORKS = [
       ["2", [["kw", "from"], [" rifft "], ["kw", "import"], [" "], ["fn", "trace"]]],
       ["3", [["kw", "from"], [" crewai "], ["kw", "import"], [" Crew, Agent"]]],
       ["4", [[" "]]],
-      ["5", [["punc", "@"], ["fn", "trace"], ["punc", "("], ["var", "name"], ["punc", "="], ["str", '"research"'], ["punc", ")"]]],
+      ["5", [["punc", "@"], ["fn", "trace"], ["punc", "("], ["var", "agent_id"], ["punc", "="], ["str", '"research"'], ["punc", ")"]]],
       ["6", [["kw", "def"], [" "], ["fn", "research"], ["punc", "("], ["var", "query"], ["punc", "):"]]],
       ["7", [["    crew "], ["punc", "="], [" Crew(agents=[planner, researcher, publisher])"]]],
       ["8", [["    "], ["kw", "return"], [" crew."], ["fn", "kickoff"], ["punc", "("], ["var", "query"], ["punc", ")"]]],
@@ -361,7 +361,7 @@ function HowCanvas({ step }: { step: number }) {
       <div style={{ color: "var(--fg-3)", fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 14, fontFamily: "var(--mono)" }}>STEP 01 · agent.py</div>
       <pre style={{ margin: 0, color: "var(--fg-2)", lineHeight: 1.7, fontFamily: "var(--mono)", fontSize: 12 }}>
         <span style={{ color: "#c08bd8" }}>from</span>{" rifft "}<span style={{ color: "#c08bd8" }}>import</span>{" "}<span style={{ color: "var(--accent)" }}>trace</span>{"\n\n"}
-        <span style={{ color: "var(--accent)" }}>@trace</span>{"(name="}<span style={{ color: "var(--accent)" }}>"research"</span>{")\n"}
+        <span style={{ color: "var(--accent)" }}>@trace</span>{"(agent_id="}<span style={{ color: "var(--accent)" }}>"research"</span>{")\n"}
         <span style={{ color: "#c08bd8" }}>def</span>{" "}<span style={{ color: "#d8b970" }}>run</span>{"(query):\n"}
         {"    crew = Crew(agents=[\n"}
         {"        planner, researcher, publisher])\n"}

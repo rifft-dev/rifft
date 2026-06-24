@@ -32,15 +32,16 @@ type FirstTraceResponse = {
 type FirstTraceError = "unauthorized" | "forbidden" | "missing_active_project" | "network_error" | null;
 type SampleTraceResponse = { traceId?: string; error?: string; message?: string };
 
-type TabOption = "crewai" | "autogen" | "python" | "node" | "mcp";
+type TabOption = "langgraph" | "crewai" | "autogen" | "python" | "node" | "mcp";
 type PackageManagerOption = "npm" | "pnpm" | "yarn";
 
 const TABS: { id: TabOption; label: string }[] = [
-  { id: "crewai",  label: "CrewAI"  },
-  { id: "autogen", label: "AG2" },
-  { id: "python",  label: "Python"  },
-  { id: "node",    label: "Node.js" },
-  { id: "mcp",     label: "MCP"     },
+  { id: "langgraph", label: "LangGraph" },
+  { id: "crewai",    label: "CrewAI"    },
+  { id: "autogen",   label: "AG2"       },
+  { id: "python",    label: "Python"    },
+  { id: "node",      label: "Node.js"   },
+  { id: "mcp",       label: "MCP"       },
 ];
 
 const buildSnippet = ({
@@ -57,6 +58,20 @@ const buildSnippet = ({
   apiKey: string | null;
 }) => {
   const key = apiKey ?? "rft_live_...";
+
+  if (tab === "langgraph") {
+    return `pip install rifft-sdk rifft-langgraph
+
+import rifft
+import rifft.adapters.langgraph  # auto-instruments StateGraph
+
+rifft.init(
+  project_id="${projectId}",
+  endpoint="${ingestUrl}",
+  api_key="${key}"
+)
+# Run your graph normally — every node, handoff, and invoke is traced`;
+  }
 
   if (tab === "crewai") {
     return `pip install rifft-sdk rifft-crewai
@@ -162,7 +177,7 @@ export function FirstTraceOnboarding({
   const [firstTraceId, setFirstTraceId] = useState<string | null>(null);
   const [isStartingCheckout, setIsStartingCheckout] = useState(false);
   const [pollingError, setPollingError] = useState<FirstTraceError>(null);
-  const [tab, setTab] = useState<TabOption>("crewai");
+  const [tab, setTab] = useState<TabOption>("langgraph");
   const [packageManager, setPackageManager] = useState<PackageManagerOption>("npm");
   const [isSendingSample, setIsSendingSample] = useState(false);
 

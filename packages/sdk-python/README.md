@@ -13,7 +13,10 @@ pip install rifft-sdk
 Add the optional adapter for your framework:
 
 ```bash
-pip install rifft-sdk rifft-crewai
+pip install rifft-sdk rifft-langgraph   # LangGraph
+pip install rifft-sdk rifft-crewai      # CrewAI
+pip install rifft-sdk rifft-autogen     # AutoGen / AG2
+pip install rifft-sdk rifft-mcp         # MCP
 ```
 
 ## Quickstart
@@ -36,7 +39,7 @@ run_research()
 - `project_id="default"`
 - `endpoint="http://localhost:4318"`
 - `service_name` inferred from your current directory
-- installed adapters like `rifft-crewai`, `rifft-autogen`, and `rifft-mcp` auto-instrument on init
+- installed adapters like `rifft-langgraph`, `rifft-crewai`, `rifft-autogen`, and `rifft-mcp` auto-instrument on init
 
 For hosted cloud projects, pass the project credentials directly or set env vars:
 
@@ -93,7 +96,7 @@ export RIFFT_API_KEY=rft_live_xxxxxxxxxxxx
 - agent and tool spans with timing and cost metadata
 - communication edges and handoff visibility
 - Claude Code session tracing with zero code changes
-- compatibility with Rifft adapters such as CrewAI, AutoGen, and MCP
+- compatibility with Rifft adapters: LangGraph, CrewAI, AutoGen, and MCP
 
 ## Links
 
