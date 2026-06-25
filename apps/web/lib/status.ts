@@ -3,4 +3,4 @@ const isLocalApp =
   process.env.NODE_ENV !== "production" ||
   /localhost|127\.0\.0\.1/.test(appUrl);
 
-export const statusPageHref = isLocalApp ? "/status" : "https://status.rifft.dev";
+export const statusPageHref = isLocalApp ? "/status" : "https://rifft.dev/status";
