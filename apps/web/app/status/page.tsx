@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { PublicNav } from "@/components/public-nav";
 import { siteName, siteUrl } from "@/lib/seo";
 import { StatusClient } from "./status-client";
 
@@ -19,7 +18,6 @@ export const metadata: Metadata = {
 export default function StatusPage() {
   return (
     <div className="min-h-screen bg-background">
-      <PublicNav badge="Status" />
       <StatusClient />
     </div>
   );
